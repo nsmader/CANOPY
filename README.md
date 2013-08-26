@@ -15,5 +15,13 @@ CANOPY uses a [simulated annealing](http://en.wikipedia.org/wiki/Simulated_annea
  
 ## Project Development
 
-This project is currently in beta form, applied to a simple motivating example.
+This project is currently in beta form, applied to a simple motivating example. In this example, there is a number of seats to be allocated across [Chicago community areas](http://en.wikipedia.org/wiki/Community_areas_in_Chicago), where the value of *n* seats allocated to community *i* equals
 
+<p align="center">
+<img src="http://latex.codecogs.com/gif.latex?V_i(n)=\left\{\begin{matrix}
+ \sqrt{n} & if\ i\ is\ odd \\ 
+ 0 & if\ i\ is\ even
+\end{matrix} \right.", border="0"/>
+</p>
+
+which was chosen because the global optimum is easily deducible as an even distribution of total resources across all odd-numbered community areas (and which is simple to identify visually from mapped runs of the algorithm), and which creates an interesting view of the search path towards optimality given the initialized allocation of uniform distribution across community areas.
