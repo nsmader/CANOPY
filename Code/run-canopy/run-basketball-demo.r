@@ -25,18 +25,19 @@
 #############################################################
 
   load("./data/prepped/youth-to-court-data.Rda")
-    ny <- length(y2c)
+    ny <- nrow(y2c)
   load("./data/prepped/court-to-court-distances.Rda")
     
   # Determine weight for youth in objective
     
-    addWgt <- function(y) {
-      y$Wgt[y$Pov == "n200_.FPL"  ] <- 1
-      y$Wgt[y$Pov == "n100_199FPL"] <- 2
-      y$Wgt[y$Pov == "n50_99FPL"  ] <- 3
-      y$Wgt[y$Pov == "n0_50FPL"   ] <- 4
-      return(unique(y[, c("y.Id", "Wgt")]))
-    }
+    y2c$Wgt[y2c$pov == "n200_.FPL"  ] <- 1
+    y2c$Wgt[y2c$pov == "n100_199FPL"] <- 2
+    y2c$Wgt[y2c$pov == "n50_99FPL"  ] <- 3
+    y2c$Wgt[y2c$pov == "n0_50FPL"   ] <- 4
+    yWgt <- unique(y2c[, c("y.Id", "Wgt")])
+
+  # Add an error draw for youth
+    y2c$e <- runif(nrow(y2c))
 
   #-------------------------------------------#
   # # # Set Initial Allocation and Counts # # #
@@ -63,11 +64,11 @@
       # Get youth probability by dividing value by sum of values by y
       # Inner product between probability and scores
       
-      y2c.o <- merge(x=y2c, y=vStateN, by=c.Id)
+      y2c.o <- merge(x=y2c, y=vStateN, by="c.Id")
       
-      y2c.o <- within(y2c.o, eVij <- exp(1.5 + (-1.0)*d + (-0.2)*d*cr + 0.5*(s) + 1.5*runif(nrow(y2c))))
+      y2c.o <- within(y2c.o, eVij <- exp(1.5 + (-1.0)*d + (-0.2)*d*cr + 0.5*(s0) + 1.5*e))
       
-      Sum.eVij <- aggregate(y2c.o$eVij, list(y2c.o$y.Id), mean, na.rm = T)
+      Sum.eVij <- tapply(y2c.o$eVij, factor(y2c.o$y.Id), mean, na.rm = T)
       colnames(Sum.eVij) <- c("y.Id", "Sum.eVij")
       yPr <- merge(y2c.o[, c("y.Id", "eVij")], Sum.eVij, by="y.Id")
       yPr$Pr <- yPr$eVij / (1 + yPr$Sum.eVij)

@@ -93,25 +93,25 @@
   mi.per.degLong <- 53; degLong.per.mi <- 1/mi.per.degLong
   summary(cbind(youthGeo$Lat, youthGeo$Long))
   nYouth <- nrow(youthGeo)
-  youthGeo$Xjit <- youthGeo$Lat  + runif(nYouth)*(.5)*(degLong.per.mi)
-  youthGeo$Yjit <- youthGeo$Long + runif(nYouth)*(.5)*(degLat.per.mi)
+  youthGeo$Xjit <- youthGeo$Long + runif(nYouth)*(.5)*(degLong.per.mi)
+  youthGeo$Yjit <- youthGeo$Lat  + runif(nYouth)*(.5)*(degLat.per.mi)
   summary(cbind(youthGeo$Xjit, youthGeo$Yjit))
 
 # Load and geocode basketball court data
   courtData <- read.csv("./data/raw/ball-courts.csv", header = T)
-  courtData <- within(courtData, 
-                      { Address <- paste(Street.Address, City, State, sep = ", ") })
+  courtData <- within(courtData, {
+                      Address <- paste(Street.Address, City, State, sep = ", ") })
   courtGeo <- sapply(courtData$Address, gGeoCode) # XXX This is returning NAs that I wouldn't expect it to. Return to this.  
   courtGeo.t <- t(courtGeo)
   courtGeo.t <- courtGeo.t[!is.na(courtGeo.t[,1]),]
-  courtXY <- data.frame(cbind(1:ncol(courtGeo), t(courtGeo)))
+  courtXY <- data.frame(cbind(1:nrow(courtGeo.t), courtGeo.t))
   rownames(courtXY) <- NULL
-  colnames(courtXY) <- c("c.Id", "X", "Y")
+  colnames(courtXY) <- c("c.Id", "Y", "X")
 
 # Establish city-block distance calculations
   L1Dist_DegToMi <- function(o.x, o.y, d.x, d.y){
     return(abs(o.x-d.x)*(mi.per.degLong) + abs(o.y-d.y)*(mi.per.degLat))
-  } 
+  }
 
 # Calculate court-to-court distances
   c2c.dist <- function(c1, c2){
@@ -120,24 +120,44 @@
   nCourts <- nrow(courtXY)
   c2c <- matrix(mapply(c2c.dist, rep(1:nCourts, each=nCourts), rep(1:nCourts, times=nCourts)), nrow=nCourts)
 
+# Calculate youth-to-court distances ... takes too long to compute and store all (~200k*100 ~= 20m) distance combinations
+#   y2c.dist <- function(i_yth, i_crt){
+#     L1Dist_DegToMi(youthGeo$Long[i_yth], youthGeo$Lat[i_yth], courtXY$X[i_crt], courtXY$Y[i_crt])
+#   }
+#   nYouth <- nrow(youthGeo)
+#   system.time({
+#     y2c <- matrix(mapply(c2c.dist, rep(1:nYouth, each=nCourts), rep(1:nCourts, times=nYouth)), nrow=nYouth)
+#   })
+
 # Match youth to all courts and keep only those within a given radius (tot avoid carrying around more data than we can store)
 
-  nKeptCourts <- 0 # This will be used to pre-allocate a data.frame that will hold the results
+nKeptCombos <- 0 # This will be used to pre-allocate a data.frame that will hold the results
   getBallCourtsBall <- function(ixy, maxRad = 3.0){ # Name is a topology joke
     m <- merge(x=youthGeo[ixy,], y=courtXY)
     m$d <- L1Dist_DegToMi(m$Xjit, m$Yjit, m$X, m$Y)
     keepCourts <- m$d < maxRad & !is.na(m$d)
-    nKeptCourts <- nKeptCourts + sum(keepCourts)
-    return(m[keepCourts, c("y.Id", "c.Id", "pov", "d")])
+    nKeptCombos <<- nKeptCombos + sum(keepCourts)
+    return(m[keepCourts, c("y.Id", "c.Id", "pov", "d", "cr")])
   }
-  system.time({ y2c <- lapply(1:nrow(youthGeo), getBallCourtsBall) })
-  y2c.df <- data.frame(runif(nrow(youthGeo)*nKeptCourts*4), nrow=youthGeo*nKeptCourts)
-  y2c.df <- ldply(y2c, data.frame)
-  #youth.to.court.matches <- do.call("rbind", yc)
   
-# Output file: youth-court matches, coded with
+  # Attempting to get preallocate and run the single job of returning results to a data.frame. This was abandoned in favor
+  #   of carving up the job, since run-times here were taking too long
+#   y2c <- data.frame(matrix(runif(4*3.5e6), nrow=3.5e6)) # Try to preallocate memory
+#   system.time({ y2c <- adply(1:nrow(youthGeo), 1, getBallCourtsBall) }) # adply has slower runtime than lapply, but gives us output in the form that we want: a dataframe
+
+  # Trying to carve up the job into multiple parts, since run time appears to be convex in job size
+  partSize <- ceiling(nrow(youthGeo) / 50)
+  for (part in 1:50) {
+    bot <- partSize*(part-1)+1
+    top <- min(nrow(youthGeo), partSize*part)
+    print(paste("Working on part", part, "-- working on obs",bot,"to",top))
+    system.time( assign(paste0("y2c_", part), adply(bot:top, 1, getBallCourtsBall)) )
+  }
+  y2c <- do.call("rbind", mget(grep("y2c_", ls(), value=T)))
+  rm(list=grep("y2c_", ls(), value=T))
   
-  save(youth.to.court.matches, file="./data/prepped/youth-to-court-data.Rda")
+# Output file: youth-court matches, coded with poverty, and court-to-court distances
+  
   save(y2c, file="./data/prepped/youth-to-court-data.Rda")
   save(c2c, file="./data/prepped/court-to-court-distances.Rda")
 
