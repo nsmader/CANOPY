@@ -101,10 +101,27 @@
   courtData <- read.csv("./data/raw/ball-courts.csv", header = T)
   courtData <- within(courtData, {
                       Address <- paste(Street.Address, City, State, sep = ", ") })
-  courtGeo <- sapply(courtData$Address, gGeoCode) # XXX This is returning NAs that I wouldn't expect it to. Return to this.  
-  courtGeo.t <- t(courtGeo)
-  courtGeo.t <- courtGeo.t[!is.na(courtGeo.t[,1]),]
-  courtXY <- data.frame(cbind(1:nrow(courtGeo.t), courtGeo.t))
+  courtData$Park <- as.character(courtData$Park)
+
+  # The geocoding works more reliably when the calls are separated.
+  # This code has replaced a call of sapply(CourtData$Address, gGeoCode), which would often get only 60-80 non-NA values
+  courtGeo <- NULL
+  for (i in 1:nrow(courtData)) {
+    myPark <- courtData$Park[i]
+    myAddr <- courtData$Address[i]
+    g <- cbind(myPark, myAddr, t(gGeoCode(myAddr)))
+    Sys.sleep(0.2) 
+    courtGeo <- rbind(courtGeo, g)
+    #print(i); print(g)
+  }
+  sum(!is.na(test[,2]))
+  courtGeo <- data.frame(courtGeo)
+  colnames(courtGeo) <- c("Park", "Address", "Y", "X")
+  save(courtGeo, file = "./data/prepped/ball-courts-geocoded.csv")
+  
+  courtXY <- courtGeo[!is.na(courtGeo$X), c("X", "Y")]
+  courtXY$c.Id <- 1:nrow(courtGeo)
+  courtXY <- data.frame(cbind(1:nrow(courtGeo), courtGeo))
   rownames(courtXY) <- NULL
   colnames(courtXY) <- c("c.Id", "Y", "X")
 
