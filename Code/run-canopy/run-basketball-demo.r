@@ -12,10 +12,11 @@
   setwd("~/GitHub/canopy")
   source("./code/run-canopy/declare-canopy-method.r")
   "%&%" <- function(...){paste(..., sep="")}
-  require(compiler)
   library(plyr) # Need to use join()
   library(data.table) # To horserace against join() and other methods of merging tables for speed
-  
+  require(compiler)
+  enableJIT(3)
+
 
 #####################
 # Set Run Parameters
