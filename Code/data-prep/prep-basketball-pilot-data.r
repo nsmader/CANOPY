@@ -137,15 +137,6 @@
   nCourts <- nrow(courtXY)
   c2c <- matrix(mapply(c2c.dist, rep(1:nCourts, each=nCourts), rep(1:nCourts, times=nCourts)), nrow=nCourts)
 
-# Calculate youth-to-court distances ... takes too long to compute and store all (~200k*100 ~= 20m) distance combinations
-#   y2c.dist <- function(i_yth, i_crt){
-#     L1Dist_DegToMi(youthGeo$Long[i_yth], youthGeo$Lat[i_yth], courtXY$X[i_crt], courtXY$Y[i_crt])
-#   }
-#   nYouth <- nrow(youthGeo)
-#   system.time({
-#     y2c <- matrix(mapply(c2c.dist, rep(1:nYouth, each=nCourts), rep(1:nCourts, times=nYouth)), nrow=nYouth)
-#   })
-
 # Match youth to all courts and keep only those within a given radius (tot avoid carrying around more data than we can store)
 
 nKeptCombos <- 0 # This will be used to pre-allocate a data.frame that will hold the results

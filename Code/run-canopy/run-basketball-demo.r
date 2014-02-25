@@ -13,7 +13,7 @@
   source("./code/run-canopy/declare-canopy-method.r")
   "%&%" <- function(...){paste(..., sep="")}
   library(plyr) # Need to use join()
-  library(data.table) # To horserace against join() and other methods of merging tables for speed
+  library(data.table) # To race against join() and other methods of merging tables for speed
   require(compiler)
   enableJIT(3)
 
@@ -40,14 +40,11 @@
     
   # Determine weight for youth in objective
     
-    y2c$Wgt[y2c$pov == "n200_.FPL"  ] <- 1
-    y2c$Wgt[y2c$pov == "n100_199FPL"] <- 2
-    y2c$Wgt[y2c$pov == "n50_99FPL"  ] <- 3
-    y2c$Wgt[y2c$pov == "n0_50FPL"   ] <- 4
-    yWgt <- unique(y2c[, c("y.Id", "Wgt")])
-
-  # Add an error draw for youth
-    y2c$e <- rnorm(nrow(y2c))
+    y2c$w[y2c$pov == "n200_.FPL"  ] <- 1
+    y2c$w[y2c$pov == "n100_199FPL"] <- 2
+    y2c$w[y2c$pov == "n50_99FPL"  ] <- 3
+    y2c$w[y2c$pov == "n0_50FPL"   ] <- 4
+    yWgt <- unique(y2c[, c("y.Id", "w")])
 
   #-------------------------------------------#
   # # # Set Initial Allocation and Counts # # #
@@ -91,19 +88,19 @@
 
         # Prepare the matrix, which should be nyc by nc
         y2c_c.times.vert  <- matrix(rep(y2c$c.Id, n.c), nrow = n.yc)
-        c_y2c.times.horiz <- matrix(rep(c.Id,    n.yc), nrow = n.yc, byrow=TRUE)
+        c_y2c.times.horiz <- matrix(rep(c.Id.unq, n.yc), nrow = n.yc, byrow=TRUE)
 
         # Declare s.to.yc as a logical matrix, to avoid typing as double
         s.to.yc <- array(FALSE, c(nrow(y2c), ncol(n.c)))
         s.to.yc <- (y2c_c.times.vert == c_y2c.times.horiz) 
         # Also create a version of the matrix which is a double, since %*% casts into a double, and this may save time
         s.to.yc.d <- (y2c_c.times.vert == c_y2c.times.horiz)
-        rm(y2c.by.c, c.by.y2c)
+        rm(y2c_c.times.vert, c_y2c.times.horiz)
 
         # Test speeds
         system.time(y2c.s <- s.to.yc %*% s0)
         # In a test with nyc ~= 800k, nc = 60, since s.to.yc has been typed as logical, 
-        # different runs took 0.83, 0.75, 0.63... seconds.
+        # different runs took 10.7, 0.83, 0.83, 0.73... seconds.
         # After enableJIT(3), took: 8.08, 0.94, 0.78, 0.61, 0.54, 0.47, 0.45
         system.time(y2c.s <- s.to.yc.d %*% s0)
         # Left as a double, the result is that
@@ -121,77 +118,81 @@
         # After enableJIT(3), took: 0.36, 0.30, 0.29, 0.24 seconds.
 
       # Conclusion: seems that data.table is the clear winner barring further developments
-      
+
     #----
-    # # # 2. Preallocating space for y2c.o and other objects used in the Objective call
+    # # # 2. Preallocating space/precalculating objects used in the Objective call
     #----
-      
+
+      # Precalculate what we'll need in y2c
+      y2c <- within(y2c, {
+        e <- rnorm(n.yc)
+        xb <- 1.5 + (-1.0)*d + (-2.0)*d*cr + 1.5*e # indirect utility, except for staff allocation, which gets added in at each step
+      })
+      y2c <- data.table(y2c)
+
+      # Preallocate components of y2c.o which will be added in
       y2c.o <- within(y2c, {
         s <- 1
+        e.Xbs <- exp(xb + 0.5*s)
         eXb <- 0
         Sum.eXb <- 0
         p <- 0
       })
       y2c.o <- data.table(y2c.o)
+      hist(y2c.o$xb) # if properly tuned, should have decent density both above and below 0
 
-      Sum.Pr <- data.table(aggregate(y2c.o$p, list(y2c.o$y.Id), mean, na.rm = T))
-      Sum.Pr <- setnames(Sum.Pr, c(1,2), c("y.Id", "Sum.Crt.Pr"))
+      #Sum.p <- data.table(aggregate(y2c.o$p, list(y2c.o$y.Id), mean, na.rm = T))
+      #Sum.p <- setnames(Sum.p, c(1,2), c("y.Id", "p"))
+      Sum.p <- y2c.o[, lapply(.SD, sum), by = y.Id, .SDcols=c("p")]
 
-      yWgt <- data.table(yWgt)      
-      yPrPov <- merge(Sum.Pr, yWgt, by="y.Id")
-      score <- as.vector(yPrPov$Sum.Crt.Pr) %*% as.vector(t(yPrPov$Wgt))
+      yWgt   <- data.table(yWgt)
+      yPrPov <- merge(Sum.p, yWgt, by="y.Id")
+      score  <- t(as.vector(yPrPov$p)) %*% as.vector(yPrPov$w)
+
+  #----
+  # # # 3. Try different means to sum e.Vij within individual -- looks like data.table wins again
+  #----
+  
+  # Generating indicator function for all rows corresponding to each youth
+  #         y2c_y.times.vert  <- matrix(rep(y2c$y.Id, n.y), nrow = n.yc)
+  #         y_y2c.times.horiz <- matrix(rep(y.Id,    n.yc), nrow = n.yc, byrow=TRUE)
+  #         Sum.to.y <- array(FALSE, c(n.yc, n.y))
+  #         Sum.to.y <- (y2c_y.times.vert == y_y2c.times.horiz)
+  #         rm(y2c_y.times.vert, y_y2c.times.horiz)
+  
+  # Attempting the same with data.table -- works faster than 
+  y.pr.sums <- y2c.o[, lapply(.SD, sum), by = y.Id, .SDcols=c("p")]
+  # See data.table FAQ at: http://rwiki.sciviews.org/doku.php?id=packages:cran:data.table
+
     
-    #----
-    # # # 3. Pre-calculate quantities used in Obj() call
-    #----
-      xb <- with(y2c, 1.5 + (-1.0)*d + (-0.2)*d*cr + 0.5*(s0) + 1.5*e) # indirect utility, except for staff allocation
-      hist(xb) # if properly tuned, should have decent density both above and below 0
-      # XXX Note: may still play with parameters to get good probability distributions, especially showing 
-
-    #----
-    # # # 4. Try different means to sum e.Vij within individual
-    #----
-
-      # Generating indicator function for all rows corresponding to each youth
-        y2c_y.times.vert  <- matrix(rep(y2c$y.Id, n.y), nrow = n.yc)
-        y_y2c.times.horiz <- matrix(rep(y.Id,    n.yc), nrow = n.yc, byrow=TRUE)
-        Sum.to.y <- array(FALSE, c(n.yc, n.y))
-        Sum.to.y <- (y2c_y.times.vert == y_y2c.times.horiz)
-        rm(y2c_y.times.vert, y_y2c.times.horiz)
-
-      # Attempting the same with data.table
-        y.pr.sums <- y2c.o[, lapply(.SD, sum), by = y.Id, .SDcols=c("p")]
-          # See data.table FAQ at: http://rwiki.sciviews.org/doku.php?id=packages:cran:data.table
-        
-
 #--------------------------------------#
 # # # Set Function To Be Minimized # # #
 #--------------------------------------#
 
     # The objective is a concave function of the number of seats in the even numbered Community Areas
-    Obj <- function(vStateN) {
+    Obj <- function(a) {
       # Merge in staff allocation data for probability calculations
       # Generate function value for each y2c combination
       # Get youth probability by dividing value by sum of values by y
       # Inner product between probability and scores
       
-      e.Xbs <- exp(xb + 0.5*s) # add staff allocations to indirect utility and raise as exponent
+      colnames(a) <- c("c.Id", "s") # We're naming this to generic "s" since many states may be passed into this function
+      y2c.o <- merge(y2c, a, by="c.Id")
+      y2c.o <- within(y2c.o, e.Xbs <- exp(xb + 0.5*s)) # add staff allocations to indirect utility and raise as exponent
       
-      Sum.eXbs <- tapply(e.xbs, list(y2c.o$y.Id), mean, na.rm = T) # Runs faster than aggregate
-      Sum.eXbs <- data.frame(Sum.eXb)
-      Sum.eXb$y.Id <- rownames(Sum.eXb)
-      y2c.o <- merge(y2c.o, Sum.eXb, by="y.Id")
-      y2c.o$p <- y2c.o$eXb / (1 + y2c.o$Sum.eXb)
+      #Sum.eXbs <- tapply(e.xbs, list(y2c.o$y.Id), mean, na.rm = T) # Faster than aggregate... slower than lapply within a data.table
+      Sum.eXbs <- y2c.o[, lapply(.SD, sum), by = y.Id, .SDcols=c("e.Xbs")]
+      y2c.o <- merge(y2c.o, Sum.eXbs, by="y.Id")
+      y2c.o$p <- y2c.o$eXbs / (1 + y2c.o$Sum.eXbs)
         # The 1 represents the normalized value of the alternative Vi0, since: 1 = exp(0)
       
       #Sum probability that each youth plays ball
-      Sum.Pr <- aggregate(y2c.o$p, list(y2c.o$y.Id), mean, na.rm = T)
-      colnames(Sum.Pr) <- c("y.Id", "TotPr")
+      Sum.p <- y2c.o[, lapply(.SD, sum), by = y.Id, .SDcols=c("p")]
       
       # Merge in youth objective weights and score
-      yPrPov <- join(Sum.Pr, yWgt, by="y.Id")
-      score <- as.vector(yPrPov$TotPr) %*% as.vector(t(yPrPov$Wgt))
-      #hist(Sum.Pr$TotPr)
+      yPrPov <- merge(Sum.p, yWgt, by="y.Id")
+      score  <- t(as.vector(yPrPov$p)) %*% as.vector(yPrPov$w)
+      #hist(Sum.p$TotPr)
       
       return(score)
     }
@@ -203,8 +204,31 @@
     # Prepare inverse distances between courts
     c2c.inv <- 1/c2c
     diag(c2c.inv) <- 0 # Otherwise, this is infinite
-    nc == nrow(c2c.inv)
+    n.c == nrow(c2c.inv)
       # Check that the length of the distance file is the same as the allocations vector (which is based off of # of court ids)
+
+    ReAlloc <- function(s0, TransMatrix, vLower, vUpper) {
+      
+      # Randomly select a courts to pull seat from
+      
+        EligFrom <- (1:n.c)[s0!=vLower]
+        FromRow <- sample(EligFrom, 1)
+        # print(paste("FromRow =", FromRow))
+      
+      # Randomly select a community area to send seat to
+      
+        EligTo <- (1:n.c)[s0!=vUpper]
+        vTransProbs <- TransMatrix[FromRow, EligTo]/sum(TransMatrix[FromRow, EligTo])
+        vCumTransProbs <- cumsum(vTransProbs)
+        ToRow <- findInterval(runif(1), vCumTransProbs)
+        # print(paste("ToRow =", ToRow))
+      
+      # Reassign -- modify s0 to be s_prop when it is returned
+      
+        s0[FromRow] <- s0[FromRow] - 1
+        s0[ToRow]   <- s0[ToRow]   + 1
+        return(s0)
+    }
 
   #------------------------------------------#
   # # # Establish a Temperature Function # # #
@@ -225,15 +249,16 @@
 #########################
 
   # debug(simulated_annealing)
-  Out <- canopy(cost        = Obj,
-                s0          = Alloc$s0,
+  Out <- canopy(obj         = Obj,
+                alloc       = Alloc,
                 lower       = vLowerBound,
                 upper       = vUpperBound,
                 neighbor    = ReAlloc,
+                transmat    = c2c.inv,
                 temperature = Temp,
-                iterations  = nIter,
-                checkpoint  = nCheckPoint,
-                verbose     = FALSE)
+                iterations  = 15, # nIter
+                checkpoint  = 3, # nCheckPoint
+                verbose     = FALSE) # s0 = Alloc$s0,
 
   save(Out, file = "./data/out/Simulated Annealing Output", sep="")
 
