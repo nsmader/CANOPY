@@ -137,7 +137,7 @@
   nCourts <- nrow(courtXY)
   c2c <- matrix(mapply(c2c.dist, rep(1:nCourts, each=nCourts), rep(1:nCourts, times=nCourts)), nrow=nCourts)
 
-# Match youth to all courts and keep only those within a given radius (tot avoid carrying around more data than we can store)
+# Match youth to all courts and keep only those within a given radius (to avoid carrying around more data than we can store)
 
 nKeptCombos <- 0 # This will be used to pre-allocate a data.frame that will hold the results
   getBallCourtsBall <- function(ixy, maxRad = 3.0){ # Name is a topology joke

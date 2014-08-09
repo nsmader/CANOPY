@@ -11,7 +11,7 @@
 # * alloc: a mapping between facility ID and initial allocation (which is pulled out as s_0).
 # * lower, upper: Lower and upper bounds of what can feasibly allocated to each facility.
 # * neighbor: Function from states to states. Produces what the Metropolis algorithm would call a proposal.
-# * temperature: Function specifying the temperature at time i.
+# * temperature: Function specifying the temperature at step i.
 # * iterations: Number of iterations of the algorithm that will be run. This is the only termination condition.
 # * checkpoint: Frequency, in number of interations, that the procedure will save step, run time, best state visited, best obj value obtained.
 # * keep_best: Do we return the best state visited or the last state visited? This is defaulted to true and, for now, is not offered as an option to turn off.
@@ -42,12 +42,13 @@ canopy <- function(obj,
   print(colnames(alloc))
   best_o <- obj(alloc[, c("c.Id", "s_n")])
   
-  # Initialize checkpoints.
+  # Initialize checkpoints. XXX Come back to this: initialize the full size of the object
   checks <- list(0, 0, best_s, best_o)
   names(checks) <- c("Step", "RunTime", "StateHistory", "Cost")
+  temp <- temperature(Iter = 1, MaxIter = iterations)
   StartTime <- Sys.time()
   
-  # Set iterations of the procedure.
+  # Set iterations of the procedure. XXX Look into use of Rcpp to run this loop. The speedup will be critical.
   for (i in 1:iterations) {
     
     # Obtain a proposal, and prepare to compare it to the current state.
@@ -55,8 +56,9 @@ canopy <- function(obj,
     s_prop <- neighbor(alloc, TransMatrix = transmat, vLower = lower, vUpper = upper)
     o_prop <- obj(alloc[, c("c.Id", "s_prop")])
     if (TRUE == verbose) {
-      print("Current state:");  print(alloc$s_n)
-      print("Proposed state:"); print(alloc$s_prop)
+      print(alloc[, c("s_n", "s_prop")])
+      #print("Current state:");  print(alloc$s_n)
+      #print("Proposed state:"); print(alloc$s_prop)
       print(paste0("Current Cost: ", o_n, " --- Proposed Step Cost: ", o_prop))
     }
     
@@ -66,8 +68,8 @@ canopy <- function(obj,
       alloc$s_n <- alloc$s_prop
       if (TRUE == verbose) print(paste("Step ", i, "Accepted"))
     } else { # If the move increased our cost, consider acceptance
-      t <- temperature(Iter = i, MaxIter = iterations)
-      p_a <- exp(-((o_n - o_prop) / t) )
+      temp <- temperature(Iter = i, MaxIter = iterations) # Note: we're only calculating the temp if we have to, i.e. if we're not improving
+      p_a <- exp(-((o_n - o_prop) / temp) )
         # The argument to exp() will always be negative, ensuring probability of acceptance p_a < 1.
         # That argument is more negative as temperature decreases, as the relatively lower that o_prop is.
         # XXX Do we want to standardize the units of difference between o_n and o_prop?
@@ -89,7 +91,7 @@ canopy <- function(obj,
     if (i %% checkpoint == 0 ) {
       Time <- difftime(Sys.time(), StartTime, units = "secs")
       print(paste0("Step ", prettyNum(i, big.mark=","), ": Current vs. Best Cost: (", round(o_n,1), ", ", round(best_o,1), 
-              "), Temp:",  round(t,3), ", Time taken: ", round(Time), ", Best State:"))
+              "), Temp (as of last rejection):",  round(temp, 3), ", Time taken: ", round(Time), ", Best State:"))
       print(best_s); cat("\n")
       checks$Step         <- cbind(checks$Step, i)
       checks$StateHistory <- cbind(checks$StateHistory, best_s)

@@ -15,7 +15,8 @@
   library(plyr) # Need to use join()
   library(data.table) # To race against join() and other methods of merging tables for speed
   require(compiler)
-  enableJIT(3)
+  #enableJIT(3)
+  enableJIT(0)
 
 
 #####################
@@ -32,10 +33,10 @@
   load("./data/prepped/youth-to-court-data.Rda")
     n.yc <- nrow(y2c)
 
-    y.Id.unq <- unique(y2c$y.Id)
-    c.Id.unq <- unique(y2c$c.Id)
-    n.y <- length(y.Id.unq)
-    n.c <- length(c.Id.unq)
+    y.u <- unique(y2c$y.Id)
+    c.u <- unique(y2c$c.Id)
+    n.y <- length(y.u)
+    n.c <- length(c.u)
   load("./data/prepped/court-to-court-distances.Rda")
     
   # Determine weight for youth in objective
@@ -52,13 +53,13 @@
 
     # Starting resources are equal number of staff as sites
   
-    Alloc <- data.frame(c.Id.unq)
+    Alloc <- data.frame(c.u)
     colnames(Alloc) <- "c.Id"
     Alloc$s0 <- as.integer(1)
     
     # Also break out these columns as vectors to see if their use can speed of runs of Obj()
-    c.Id.unq <- as.vector(c.Id.unq)
-    s0       <- as.vector(Alloc$s0)
+    c.u <- as.vector(c.u)
+    s0  <- as.vector(Alloc$s0)
 
     # Set lower and upper bounds
     vLowerBound <- as.vector(rep(0, n.c))
@@ -86,13 +87,12 @@
       # Generate indicator function to create mapping using inner products.
         # (The indicator matrix requires a huge chunk of memory, but may speed operation)
 
-        # Prepare the matrix, which should be nyc by nc
+        # Prepare the matrix, which should be n.yc by n.c
         y2c_c.times.vert  <- matrix(rep(y2c$c.Id, n.c), nrow = n.yc)
-        c_y2c.times.horiz <- matrix(rep(c.Id.unq, n.yc), nrow = n.yc, byrow=TRUE)
+        c_y2c.times.horiz <- matrix(rep(c.u, n.yc), nrow = n.yc, byrow=TRUE)
 
         # Declare s.to.yc as a logical matrix, to avoid typing as double
         s.to.yc <- array(FALSE, c(nrow(y2c), ncol(n.c)))
-        s.to.yc <- (y2c_c.times.vert == c_y2c.times.horiz) 
         # Also create a version of the matrix which is a double, since %*% casts into a double, and this may save time
         s.to.yc.d <- (y2c_c.times.vert == c_y2c.times.horiz)
         rm(y2c_c.times.vert, c_y2c.times.horiz)
@@ -107,7 +107,7 @@
         # different runs took 0.60, 0.77, 0.89, 0.73... seconds. 
         # After enableJIT(3), took: 15.63, 0.78, 0.64, 0.56, 0.52
 
-        # Conclusion seems to be no special difference in how this matrix is stored, expect that the logical matrix
+        # Conclusion seems to be no special difference in how this matrix is stored, except that the logical matrix
         #   saves on RAM.
 
       # Try using data.table storage and merging for the tables
@@ -153,14 +153,7 @@
   # # # 3. Try different means to sum e.Vij within individual -- looks like data.table wins again
   #----
   
-  # Generating indicator function for all rows corresponding to each youth
-  #         y2c_y.times.vert  <- matrix(rep(y2c$y.Id, n.y), nrow = n.yc)
-  #         y_y2c.times.horiz <- matrix(rep(y.Id,    n.yc), nrow = n.yc, byrow=TRUE)
-  #         Sum.to.y <- array(FALSE, c(n.yc, n.y))
-  #         Sum.to.y <- (y2c_y.times.vert == y_y2c.times.horiz)
-  #         rm(y2c_y.times.vert, y_y2c.times.horiz)
-  
-  # Attempting the same with data.table -- works faster than 
+  # data.table -- clearly works faster than other methods tried
   y.pr.sums <- y2c.o[, lapply(.SD, sum), by = y.Id, .SDcols=c("p")]
   # See data.table FAQ at: http://rwiki.sciviews.org/doku.php?id=packages:cran:data.table
 
@@ -169,21 +162,21 @@
 # # # Set Function To Be Minimized # # #
 #--------------------------------------#
 
-    # The objective is a concave function of the number of seats in the even numbered Community Areas
+    # The objective is a weighted sum of the probability that each youth goes to any court
     Obj <- function(a) {
-      # Merge in staff allocation data for probability calculations
-      # Generate function value for each y2c combination
-      # Get youth probability by dividing value by sum of values by y
-      # Inner product between probability and scores
       
+      # XXX Could this be sped by treading the data as an array or list, where every
+      # calculation stays with the right element of the array without needing to be merged back?
+      
+      # Merge in staff allocation data for probability calculations
       colnames(a) <- c("c.Id", "s") # We're naming this to generic "s" since many states may be passed into this function
       y2c.o <- merge(y2c, a, by="c.Id")
-      y2c.o <- within(y2c.o, e.Xbs <- exp(xb + 0.5*s)) # add staff allocations to indirect utility and raise as exponent
       
-      #Sum.eXbs <- tapply(e.xbs, list(y2c.o$y.Id), mean, na.rm = T) # Faster than aggregate... slower than lapply within a data.table
+      # Generate probability for each y2c combination
+      system.time(y2c.o$es <- y2c.o$e.Xbs*exp(0.5*y2c.o$s)) # add staff allocations to indirect utility and raise as exponent
       Sum.eXbs <- y2c.o[, lapply(.SD, sum), by = y.Id, .SDcols=c("e.Xbs")]
       y2c.o <- merge(y2c.o, Sum.eXbs, by="y.Id")
-      y2c.o$p <- y2c.o$eXbs / (1 + y2c.o$Sum.eXbs)
+      y2c.o$p <- y2c.o$e.Xbs.x / (1 + y2c.o$e.Xbs.y)
         # The 1 represents the normalized value of the alternative Vi0, since: 1 = exp(0)
       
       #Sum probability that each youth plays ball
@@ -196,6 +189,13 @@
       
       return(score)
     }
+  init <- data.frame(c.u, 1)
+  system.time(Obj(init))
+    system.time({
+      for (i in 1:1000){
+        Obj(init)
+      }
+    })
 
   #----------------------------------------------#
   # # # Set Function for Selecting Neighbors # # #
@@ -262,3 +262,9 @@
 
   save(Out, file = "./data/out/Simulated Annealing Output", sep="")
 
+
+################
+# DISPLAY OUTPUT 
+################
+
+  # 
