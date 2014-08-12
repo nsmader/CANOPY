@@ -18,6 +18,8 @@
     # http://www.census.gov/developers/tos/key_request.html to obtain your key
   source("./code/helper-functions/geocode-addr.r")
   source("./code/helper-functions/get-centroids.r")
+  f.to.c <- function(f){ return(levels(f)[f]) }
+  f.to.n <- function(f){ return(as.numeric(levels(f)[f])) }
 
 # Geography to pull is: city of Chicago, tract-level
 
@@ -30,14 +32,14 @@
 # Pull counts of interest (from the many columns in the table)
   povNs.e <- data.frame(povNs@estimate)
   colnames(povNs.e) <- colnames(povNs@estimate)
-  colnames(povNs.e) <- gsub("Age by Ratio of Income to Poverty Level in the Past 12 Months:  ", "", colnames(povNs.e))
-  povNs.e$n0_50FPL    <- povNs.e[, "12 to 17 years: Under .50 "]
-  povNs.e$n50_99FPL   <- povNs.e[, "12 to 17 years: .50 to .74 "]   + povNs.e[, "12 to 17 years: .75 to .99 "]
-  povNs.e$n100_199FPL <- povNs.e[, "12 to 17 years: 1.00 to 1.24 "] + povNs.e[, "12 to 17 years: 1.25 to 1.49 "] +
-                         povNs.e[, "12 to 17 years: 1.50 to 1.74 "] + povNs.e[, "12 to 17 years: 1.75 to 1.84 "] +
-                         povNs.e[, "12 to 17 years: 1.85 to 1.99 "]
-  povNs.e$n200_.FPL   <- povNs.e[, "12 to 17 years: 2.00 to 2.99 "] + povNs.e[, "12 to 17 years: 3.00 to 3.99 "] +
-                         povNs.e[, "12 to 17 years: 4.00 to 4.99 "] + povNs.e[, "12 to 17 years: 5.00 and over "]
+  colnames(povNs.e) <- gsub("Age by Ratio of Income to Poverty Level in the Past 12 Months: ", "", colnames(povNs.e))
+  povNs.e$n0_50FPL    <- povNs.e[, "12 to 17 years: Under .50"]
+  povNs.e$n50_99FPL   <- povNs.e[, "12 to 17 years: .50 to .74"]   + povNs.e[, "12 to 17 years: .75 to .99"]
+  povNs.e$n100_199FPL <- povNs.e[, "12 to 17 years: 1.00 to 1.24"] + povNs.e[, "12 to 17 years: 1.25 to 1.49"] +
+                         povNs.e[, "12 to 17 years: 1.50 to 1.74"] + povNs.e[, "12 to 17 years: 1.75 to 1.84"] +
+                         povNs.e[, "12 to 17 years: 1.85 to 1.99"]
+  povNs.e$n200_.FPL   <- povNs.e[, "12 to 17 years: 2.00 to 2.99"] + povNs.e[, "12 to 17 years: 3.00 to 3.99"] +
+                         povNs.e[, "12 to 17 years: 4.00 to 4.99"] + povNs.e[, "12 to 17 years: 5.00 and over"]
   povNs.e <- within(povNs.e, {
     tractName <- rownames(povNs.e)
     tractStr <- sapply(tractName, function(s) substr(s, 14, str_locate(s, ",")[1]-1))
@@ -68,7 +70,7 @@
   youthData <- data.frame(cbind(as.character(uP), as.character(uT)))
   rownames(youthData) <- NULL
   colnames(youthData) <- c("pov", "tract6")
-  youthData$y.Id <- 1:nrow(youthData)
+  youthData$y.id <- 1:nrow(youthData)
 
   # Check creation.
   sum(myNs[,-1]) # Should be # of youth to be created
@@ -77,13 +79,13 @@
   crime <- read.csv("./data/raw/Violent-crimes-per-capita-by-tract.csv", header = T)
   crime$tract6 <- sprintf("%06.0f", as.numeric(crime$sTract))
   crime$cr <- crime$Pct_ViolentCrime
-  youthCrime <- merge(x=youthData[, c("y.Id", "tract6", "pov")], y=crime[, c("tract6", "cr")], by="tract6")
+  youthCrime <- merge(x=youthData[, c("y.id", "tract6", "pov")], y=crime[, c("tract6", "cr")], by="tract6")
 
 # Load and merge census tract centroids for XY data
   # R function to calculate centroids of shapefiles http://gis.stackexchange.com/questions/43543/how-to-calculate-polygon-centroids-in-r-for-non-contiguous-shapes
   # In the end, got centroids from ArcGIS
   TractCentroids <- data.frame(read.csv(file = "./data/raw/CensusTractsTIGER2010_Centroids.csv", header = T))
-  youthGeo <- merge(x=youthCrime[,c("y.Id", "tract6", "pov", "cr")], y=TractCentroids[,c("TRACTCE10", "Long", "Lat")], by.x="tract6", by.y="TRACTCE10", all = FALSE)
+  youthGeo <- merge(x=youthCrime[,c("y.id", "tract6", "pov", "cr")], y=TractCentroids[,c("TRACTCE10", "Long", "Lat")], by.x="tract6", by.y="TRACTCE10", all = FALSE)
   # The all = FALSE argument restricts the merge to only observations within Chicago, since that is the scope of the census tracts in the centroids file
 
 # Jitter youth locations
@@ -114,16 +116,17 @@
     courtGeo <- rbind(courtGeo, g)
     #print(i); print(g)
   }
-  sum(!is.na(test[,2]))
+  #sum(!is.na(test[,2]))
   courtGeo <- data.frame(courtGeo)
   colnames(courtGeo) <- c("Park", "Address", "Y", "X")
+  courtGeo$X <- f.to.n(courtGeo$X)
+  courtGeo$Y <- f.to.n(courtGeo$Y)
   save(courtGeo, file = "./data/prepped/ball-courts-geocoded.csv")
   
   courtXY <- courtGeo[!is.na(courtGeo$X), c("X", "Y")]
-  courtXY$c.Id <- 1:nrow(courtGeo)
-  courtXY <- data.frame(cbind(1:nrow(courtGeo), courtGeo))
+  courtXY$c.id <- 1:nrow(courtGeo)
+  #courtXY <- data.frame(cbind(1:nrow(courtGeo), courtGeo))
   rownames(courtXY) <- NULL
-  colnames(courtXY) <- c("c.Id", "Y", "X")
 
 # Establish city-block distance calculations
   L1Dist_DegToMi <- function(o.x, o.y, d.x, d.y){
@@ -145,7 +148,7 @@ nKeptCombos <- 0 # This will be used to pre-allocate a data.frame that will hold
     m$d <- L1Dist_DegToMi(m$Xjit, m$Yjit, m$X, m$Y)
     keepCourts <- m$d < maxRad & !is.na(m$d)
     nKeptCombos <<- nKeptCombos + sum(keepCourts)
-    return(m[keepCourts, c("y.Id", "c.Id", "pov", "d", "cr")])
+    return(m[keepCourts, c("y.id", "c.id", "pov", "d", "cr")])
   }
   
   # Attempting to get preallocate and run the single job of returning results to a data.frame. This was abandoned in favor
