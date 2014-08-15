@@ -155,7 +155,7 @@
     diag(c2c.inv) <- 0 # Otherwise, this is infinite
     J == nrow(c2c.inv)
 
-    # XXX Still need to slightly refactor this, to return the j's for from and to
+    # XXX Still need to slightly refactor this, to return the j's for the from and to
     GenProposal <- function(s0, TransMatrix, vLower, vUpper) {
       
       # Randomly select a courts to pull seat from

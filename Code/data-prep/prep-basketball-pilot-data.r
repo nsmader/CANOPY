@@ -2,7 +2,7 @@
 # PULL CENSUS DATA ON YOUTH FOR CANOPY PILOT
 #-------------------------------------------
 
-# Using ACS 5-year data, get # of youth aged 6-17, cross-tabbed by poverty
+# Using ACS 5-year data, get the # of youth aged 6-17, cross-tabbed by poverty
 
 # Set up Workspace
   rm(list = ls())
