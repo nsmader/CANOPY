@@ -66,6 +66,11 @@ canopy <- function(obj,
     if (o_prop >= o_n) { # If the move improves our objective, save the step
             o_n <-       o_prop
       alloc$s_n <- alloc$s_prop
+      # XXX The parameter set is now embedded in the data, which saves clock time to modify
+        # just those rows which change, as compared to maintaining a vector of parameters and taking
+        # the time to merge it in for every calculation of Obj() Thus, here we need
+        # to save the update in the data itself, instead of just in the parameter vector.
+        # XXX Ditto for when we accept higher cost propositions.
       if (TRUE == verbose) print(paste("Step ", i, "Accepted"))
     } else { # If the move increased our cost, consider acceptance
       temp <- temperature(Iter = i, MaxIter = iterations) # Note: we're only calculating the temp if we have to, i.e. if we're not improving

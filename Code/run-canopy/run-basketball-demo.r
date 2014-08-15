@@ -68,16 +68,16 @@
   # # # Set Initial Allocation and Counts # # #
   #-------------------------------------------#
 
-    # Starting resources are equal number of staff as sites
-  
+  # Starting resources are equal number of staff as sites
     s_j <- cbind(j.u, 1)
     colnames(s_j) <- c("j", "s")
+    R <- sum(s_j$s)
     
-    # Also break out these columns as vectors to see if their use can speed of runs of Obj()
+  # Also break out these columns as vectors to see if their use can speed of runs of Obj()
     j.u <- as.vector(j.u)
-    s0  <- as.vector(s_j$s)
+    s0  <- as.vector(s_j[,2])
 
-    # Set lower and upper bounds
+  # Set lower and upper bounds
     vLowerBound <- as.vector(rep(0, J))
     vUpperBound <- as.vector(rep(J, J)) # This is effectively unconstrained, except at zero below
 
@@ -85,7 +85,7 @@
     # # # Preallocating space/precalculating objects used in the Objective call
     #----
 
-      # Precalculate what we'll need in xs_ij
+    # Precalculate what we'll need in xs_ij
       xs_ij <- merge(x_ij, s_j, by = "j")
       xs_ij <- within(xs_ij, {
         #e <- rnorm(NC)
@@ -103,23 +103,18 @@
 # # # Set Function To Be Minimized # # #
 #--------------------------------------#
 
-  # The objective is a weighted sum of the probability that each youth goes to any court
-  # This has been refactored, so that it calculates the objective based on the xs_ij data where
-  #   the allocation has been set, rather than being given a new allocation to merge in. The 
-  #   anticipated speedup is through avoiding the merge of allocation data in, where we instead make
-  #   the small tweak to the allocation upstream through the neighborh() function.
-  # Also, instead of using multiple steps to sum, merge back, and divide through by the sum of the
-  #   exp(.) terms, I'm now attempting to use sweep() to divide through for each youth ID, separated
-  #   out using ddply().
+  # The objective is a weighted sum of the probability that each youth participates in any park
 
-  #jFrom <- sample(j.u, 1); jTo <- sample(j.u, 1)
-  Obj <- function(V_ij, jFrom, jTo){ # fromDelta, toDelta # ... the Deltas are always -1 and 1 in this implementation
+  upVal <- exp(+1*0.5); downVal <- exp(-1*0.5)
+  # jFrom <- sample(j.u, 1); jTo <- sample(j.u, 1)
+  Obj <- function(V_ij, jFrom, jTo){ # upVal, downVal # ... the Deltas are always -1 and 1 in this implementation
+    
     from_ij <- V_ij$j == jFrom; to_ij <- V_ij$j == jTo
     
     # Approach of modifying all records, without time cost of subsetting
     system.time({
-      V_ij$V[from_ij] <- V_ij$V[from_ij]*exp(-1*0.5)
-      V_ij$V[to_ij  ] <- V_ij$V[to_ij  ]*exp(+1*0.5)
+      V_ij$V[from_ij] <- V_ij$V[from_ij]*downVal
+      V_ij$V[to_ij  ] <- V_ij$V[to_ij  ]*upVal
       sumV <- V_ij[, sum(V), by=i]
       vSumExbs <- as.vector(sumV$V1)
       p_i <- as.vector(vSumExbs / (1 + vSumExbs))
@@ -128,21 +123,25 @@
     })
     
     # Approach of subsetting records, to modify just those affected by the change
-    system.time({
-      iUpd <- V_ij$i[from_ij | to_ij]
-      VUpd <- V_ij[V_ij$i %in% iUpd,]
-      VSumPre <- as.vector(VUpd[, sum(V), by=i]$V1)
+    # XXX Note: updates to V_ij aren't saved for the next iteration.
+    # Thus, we'd need to join the new V values back to the original data set, which likely makes this
+    #   close to equivalent with the approach above.
+    # Then again, because we will not accept all proposals, we do not want to modify the data
+    #   when we call Obj(). This, then, should be a faster way to go.
+    system.time(
+      system.time(for (i in 1:100) iUpd <- V_ij$i[from_ij | to_ij])
+        # This seems to take up a lot of clock time: 0.03. Half of it is calculating "from_ij | to_ij"
+      system.time(VUpd <- V_ij[V_ij$i %in% iUpd,]) # This one too: 0.03 -- see if we can speed up subsetting with data.table
+      VUpd$V2 <- VUpd$V
       
-      VUpd$V[VUpd$j == jFrom] <- VUpd$V[VUpd$j == jFrom]*exp(-1*0.5)
-      VUpd$V[VUpd$j == jTo  ] <- VUpd$V[VUpd$j == jTo  ]*exp(+1*0.5)
-                                                             
-      VSumPost <- as.vector(VUpd[, sum(V), by=i]$V1)
-      pDiff_i <- VSumPost / (1 + VSumPost) - VSumPre / (1 + VSumPre)
+      VUpd$V2[VUpd$j == jFrom] <- VUpd$V2[VUpd$j == jFrom]*downVal
+      VUpd$V2[VUpd$j == jTo  ] <- VUpd$V2[VUpd$j == jTo  ]*upVal
+      
+      VSums <- VUpd[, lapply(.SD, sum), by="i", .SDcols=c("V", "V2")]
+      pDiff_i <- (VSums$V2 / (1 + VSums$V2)) - (VSums$V / (1 + VSums$V))
       #table(w_i[,1] == sumV$i) # Checking that youth ids are in the same order.
       score <- score + t(w_i[w_i[,1] %in% iUpd,2]) %*% pDiff_i
     })
-    
-    
   }
   system.time(for (i in 1:1) Obj(V_ij, sample(j.u, 1), sample(j.u, 1)))
 
@@ -155,12 +154,9 @@
     c2c.inv <- 1/c2c
     diag(c2c.inv) <- 0 # Otherwise, this is infinite
     J == nrow(c2c.inv)
-      # Check that the length of the distance file is the same as the allocations vector (which is based off of # of court ids)
 
-    # XXX Want to refactor this so that it does not just return the vector, but makes the modification
-    #   to the xs_ij data directly by modifying values only for select rows. This is expected to improve
-    #   performance over 
-    ReAlloc <- function(s0, TransMatrix, vLower, vUpper) {
+    # XXX Still need to slightly refactor this, to return the j's for from and to
+    GenProposal <- function(s0, TransMatrix, vLower, vUpper) {
       
       # Randomly select a courts to pull seat from
       
@@ -182,6 +178,8 @@
         s0[ToRow]   <- s0[ToRow]   + 1
         return(s0)
     }
+    system.time(for (i in 1:1000) GenProposal(s0, TransMatrix = c2c.inv, vLowerBound, vUpperBound))
+    # Run time is about 1e-5 per call. That's good.
 
   #------------------------------------------#
   # # # Establish a Temperature Function # # #
@@ -206,7 +204,7 @@
                 alloc       = Alloc,
                 lower       = vLowerBound,
                 upper       = vUpperBound,
-                neighbor    = ReAlloc,
+                neighbor    = GenProposal,
                 transmat    = c2c.inv,
                 temperature = Temp,
                 iterations  = 15, # nIter
@@ -223,6 +221,9 @@
   ### Calculate multiple benchmarks of the objective:
 
   # Uniform distribution of staff
+    V_unif <- V_ij
+    V_unif$s <- R / J
+    bench.unif <- Obj()
   # Distribution of staff in rough (i.e. rounded-off) proportion to neighborhood poverty
   # Distribution of staff in rough (i.e. rounded-off) proportion to # of youth in given radius
   # Distribution of staff based on simple simulated annealing objective -- without demand side eq
