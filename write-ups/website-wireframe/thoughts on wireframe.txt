@@ -1,0 +1,16 @@
+###############
+# DESIGN OUTPUT
+###############
+
+  ### This is likely for a different file -- a server.r file for the Shiny application we'll build
+  
+  # Conditional selection for prioritizing all youth, versus weights by poverty...
+  # Sliders are: relative weight placed on youth of different backgrounds, total amount of resources
+  #   made available, number of iterations offered to the run, (# of initializations, or # of
+  #   restarts from previous best solution? ... these may be too technical)
+
+  ### Brainstormed elements:
+  # Progress bar, based on the # of iterations run so far (x% complete), and plot of checkpoints
+  #   showing the best value seen so far. The (x% complete) bar can be flipped on through a flag that
+  #   is hit once the annealing routine is called, and flipped off when it's done.
+  # Bar chart showing the benchmark values, which highlights the added value from using 

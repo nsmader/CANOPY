@@ -14,6 +14,7 @@
   "%&%" <- function(...){paste(..., sep="")}
   library(plyr) # Need to use join()
   library(data.table) # To race against join() and other methods of merging tables for speed
+  library(rbenchmark)
   require(compiler)
   #enableJIT(3)
   enableJIT(0)
@@ -112,7 +113,7 @@
     from_ij <- V_ij$j == jFrom; to_ij <- V_ij$j == jTo
     
     # Approach of modifying all records, without time cost of subsetting
-    system.time({
+    #system.time({
       V_ij$V[from_ij] <- V_ij$V[from_ij]*downVal
       V_ij$V[to_ij  ] <- V_ij$V[to_ij  ]*upVal
       sumV <- V_ij[, sum(V), by=i]
@@ -120,30 +121,11 @@
       p_i <- as.vector(vSumExbs / (1 + vSumExbs))
       #table(w_i[,1] == sumV$i) # Checking that youth ids are in the same order.
       t(w_i[,2]) %*% p_i
-    })
+    #})
     
-    # Approach of subsetting records, to modify just those affected by the change
-    # XXX Note: updates to V_ij aren't saved for the next iteration.
-    # Thus, we'd need to join the new V values back to the original data set, which likely makes this
-    #   close to equivalent with the approach above.
-    # Then again, because we will not accept all proposals, we do not want to modify the data
-    #   when we call Obj(). This, then, should be a faster way to go.
-    system.time(
-      system.time(for (i in 1:100) iUpd <- V_ij$i[from_ij | to_ij])
-        # This seems to take up a lot of clock time: 0.03. Half of it is calculating "from_ij | to_ij"
-      system.time(VUpd <- V_ij[V_ij$i %in% iUpd,]) # This one too: 0.03 -- see if we can speed up subsetting with data.table
-      VUpd$V2 <- VUpd$V
-      
-      VUpd$V2[VUpd$j == jFrom] <- VUpd$V2[VUpd$j == jFrom]*downVal
-      VUpd$V2[VUpd$j == jTo  ] <- VUpd$V2[VUpd$j == jTo  ]*upVal
-      
-      VSums <- VUpd[, lapply(.SD, sum), by="i", .SDcols=c("V", "V2")]
-      pDiff_i <- (VSums$V2 / (1 + VSums$V2)) - (VSums$V / (1 + VSums$V))
-      #table(w_i[,1] == sumV$i) # Checking that youth ids are in the same order.
-      score <- score + t(w_i[w_i[,1] %in% iUpd,2]) %*% pDiff_i
-    })
   }
-  system.time(for (i in 1:1) Obj(V_ij, sample(j.u, 1), sample(j.u, 1)))
+  #system.time(for (i in 1:1) Obj(V_ij, sample(j.u, 1), sample(j.u, 1)))
+  benchmark(Obj(V_ij, sample(j.u, 1), sample(j.u, 1)))
 
 
   #----------------------------------------------#
@@ -248,19 +230,3 @@
   # Frame the differences in equivalent # of high-poverty youth who are now expected to be successfully
   #   targeted, at no cost, based simply on having better resources (data, demand side, algorithm) for planning
 
-###############
-# DESIGN OUTPUT
-###############
-
-  ### This is likely for a different file -- a server.r file for the Shiny application we'll build
-  
-  # Conditional selection for prioritizing all youth, versus weights by poverty...
-  # Sliders are: relative weight placed on youth of different backgrounds, total amount of resources
-  #   made available, number of iterations offered to the run, (# of initializations, or # of
-  #   restarts from previous best solution? ... these may be too technical)
-
-  ### Brainstormed elements:
-  # Progress bar, based on the # of iterations run so far (x% complete), and plot of checkpoints
-  #   showing the best value seen so far. The (x% complete) bar can be flipped on through a flag that
-  #   is hit once the annealing routine is called, and flipped off when it's done.
-  # Bar chart showing the benchmark values, which highlights the added value from using 
