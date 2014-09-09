@@ -1,0 +1,36 @@
+\documentclass{article}
+\usepackage[T1]{fontenc}
+
+\begin{document}
+\title{Methodology Underlying CANOPY}
+\author{Nicholas Mader (nmader@chapinhall.org)}
+
+CANOPY--a now-general name adapted based on its original application: Chicago Allocation to Neighborhood-Oriented Programs for Youth--is effectively a type of recommendation engine that can help city planners make decisions about how to allocate resources across neighborhoods, to best meet the goals that they specify. In the same way that Google Maps is able to account for many simulaneous considerations--more than a human can easily track down and integrate--of routes, alternatives, speed limits, traffic patterns to make suggestions to decision makers, CANOPY is intended to account for many complex patterns of neighborhoods, residential data, and household decision-making patterns to improve information underlying decision-making for planners without taking over any of human processes and considerations involved in making actual decisions.
+
+This document represents a formal 
+
+%%%% Note that, for simplicity at the moment, this draft was taken up in Microsoft Word to simplify drafting until the time that integration of code and/or smarter integration of graphics is called for.
+
+
+
+% Here is a code chunk.
+% 
+% <<foo, fig.height=4>>=
+% 1+1
+% letters
+% chartr('xie', 'XIE', c('xie yihui', 'Yihui Xie'))
+% par(mar=c(4, 4, .2, .2)); plot(rnorm(100))
+% @
+% 
+% Here is some code that gets evaluated but not shown
+% <<bar, echo=FALSE>>=
+% d <- data.frame(x = 1:10, y = runif(10))
+% @
+% 
+% <<meanvar, eval=TRUE>>=
+% mean(d$y); var(d$y)
+% @
+% 
+% You can also write inline expressions, e.g. $\pi=\Sexpr{pi}$, and \Sexpr{1.598673e8} is a big number.
+
+\end{document}
