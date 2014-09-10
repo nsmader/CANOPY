@@ -8,106 +8,104 @@
 # canopy()
 # Arguments:
 # * obj: Function from states to the real numbers. Often called an energy function, but this algorithm works for both positive and negative costs. We're economists. Unlike engineers, I'm maximizing rather than minimizing.
-# * alloc: a mapping between facility ID and initial allocation (which is pulled out as s_0).
+# * alloc: a mapping between facility ID and initial allocation (which is pulled out as r_0).
+# * v_ij: information on current state of individual (i) valuations for alternative (j)
 # * lower, upper: Lower and upper bounds of what can feasibly allocated to each facility.
-# * neighbor: Function from states to states. Produces what the Metropolis algorithm would call a proposal.
+# * proposal: Function from state to recommended swap. Produces what the Metropolis algorithm would call a proposal.
+# * transmat: or transition matrix, an argument to the proposal function which governs how proposals are selected
+# * nudge: this is a function that adjusts the valuations according to the proposal
 # * temperature: Function specifying the temperature at step i.
 # * iterations: Number of iterations of the algorithm that will be run. This is the only termination condition.
 # * checkpoint: Frequency, in number of interations, that the procedure will save step, run time, best state visited, best obj value obtained.
 # * keep_best: Do we return the best state visited or the last state visited? This is defaulted to true and, for now, is not offered as an option to turn off.
 
 # Additional notation:
-# * s_n, o_n: The current state of the system, and the current value of the objective.
-# * s_prop, o_prop: The next proposed state, and the corresponding objective
+# * r, o_n: The current state of the system, and the current value of the objective.
+# * r_prop, o_prop: The next proposed state, and the corresponding objective
 
 canopy <- function(obj,
                    alloc,
+                   v_ij,
                    lower,
                    upper,
-                   neighbor,
+                   proposal,
                    transmat,
+                   nudge,
                    temperature,
                    iterations,
                    checkpoint,
                    verbose = FALSE) {
 
-  # Set our current state to the specified intial state.
-  print(class(alloc))
-  alloc$s_n <- alloc$s_0
-  print(colnames(alloc))
-  
   # Declare the initial state to be the best state so far.
-  
-  best_s <- alloc$s_n
-  print(colnames(alloc))
-  best_o <- obj(alloc[, c("c.Id", "s_n")])
+    best_r <- alloc$r
+    o_n    <- obj(v_ij) 
+    best_o <- o_n
   
   # Initialize checkpoints. XXX Come back to this: initialize the full size of the object
-  checks <- list(0, 0, best_s, best_o)
-  names(checks) <- c("Step", "RunTime", "StateHistory", "Cost")
-  temp <- temperature(Iter = 1, MaxIter = iterations)
-  StartTime <- Sys.time()
+    checks <- list(0, 0, best_r, best_o)
+    names(checks) <- c("Step", "RunTime", "StateHistory", "Obj")
+    temp <- temperature(Iter = 1, MaxIter = iterations)
+    StartTime <- Sys.time()
   
-  # Set iterations of the procedure. XXX Look into use of Rcpp to run this loop. The speedup will be critical.
-  for (i in 1:iterations) {
-    
-    # Obtain a proposal, and prepare to compare it to the current state.
-    o_n    <- obj(alloc[, c("c.Id", "s_n")])
-    s_prop <- neighbor(alloc, TransMatrix = transmat, vLower = lower, vUpper = upper)
-    o_prop <- obj(alloc[, c("c.Id", "s_prop")])
-    if (TRUE == verbose) {
-      print(alloc[, c("s_n", "s_prop")])
-      #print("Current state:");  print(alloc$s_n)
-      #print("Proposed state:"); print(alloc$s_prop)
-      print(paste0("Current Cost: ", o_n, " --- Proposed Step Cost: ", o_prop))
-    }
-    
-    # Determine whether to keep the proposal.
-    if (o_prop >= o_n) { # If the move improves our objective, save the step
-            o_n <-       o_prop
-      alloc$s_n <- alloc$s_prop
-      # XXX The parameter set is now embedded in the data, which saves clock time to modify
-        # just those rows which change, as compared to maintaining a vector of parameters and taking
-        # the time to merge it in for every calculation of Obj() Thus, here we need
-        # to save the update in the data itself, instead of just in the parameter vector.
-        # XXX Ditto for when we accept higher cost propositions.
-      if (TRUE == verbose) print(paste("Step ", i, "Accepted"))
-    } else { # If the move increased our cost, consider acceptance
-      temp <- temperature(Iter = i, MaxIter = iterations) # Note: we're only calculating the temp if we have to, i.e. if we're not improving
-      p_a <- exp(-((o_n - o_prop) / temp) )
-        # The argument to exp() will always be negative, ensuring probability of acceptance p_a < 1.
-        # That argument is more negative as temperature decreases, as the relatively lower that o_prop is.
-        # XXX Do we want to standardize the units of difference between o_n and o_prop?
-      if (TRUE == verbose) paste0("Step ", i, ": pr = ", p_a)
-      if (runif(1) <= p_a) { # Accept anyway
-              o_n <-       o_prop
-        alloc$s_n <- alloc$s_prop
-        if (TRUE == verbose) print(paste("  Higher Cost Accepted"))
-      } # If we don't accept, then we retain s_n and o_n from the current iteration and wait for another proposal
-      else if (TRUE == verbose) print(paste("  Higher Cost Rejected"))
-    }
+  # Set iterations of the algorithm
+    for (i in 1:iterations) {
+      
+      # Obtain a proposal, and prepare to compare it to the current state.
+      r_prop    <- proposal(alloc, TransMatrix = transmat, vLower = lower, vUpper = upper)
+        fromProp <- r_prop[[1]]; toProp <- r_prop[[2]]
+      v_ij_prop <- nudge(v_ij, fromProp, toProp)
+      o_prop    <- obj(v_ij_prop)
+#       if (TRUE == verbose) {
+#         print(alloc[, c("r", "r_prop")])
+#         print(paste0("Current Obj: ", o_n, " --- Proposed Step Obj: ", o_prop))
+#       }
+      
+      # Determine whether to keep the proposal
+      if (o_prop >= o_n) { # If the move improves our objective, save the step
+        o_n <- o_prop
+        v_ij <- v_ij_prop
+        alloc$r[alloc$j == fromProp] <- alloc$r[alloc$j == fromProp] - 1
+        alloc$r[alloc$j == toProp  ] <- alloc$r[alloc$j == toProp] + 1
+#         if (TRUE == verbose) print(paste("Step ", i, "Accepted"))
+      } else { # If the move increased our obj, consider acceptance
+        temp <- temperature(Iter = i, MaxIter = iterations) # Note: we're only calculating the temp if we have to, i.e. if we're not improving
+        p_a <- exp(-((o_n - o_prop) / temp) )
+          # The argument to exp() will always be negative, ensuring probability of acceptance p_a < 1.
+          # That argument is more negative as temperature decreases, as the relatively lower that o_prop is.
+          # XXX Do we want to standardize the units of difference between o_n and o_prop?
+#         if (TRUE == verbose) paste0("Step ", i, ": pr = ", p_a)
+        if (runif(1) <= p_a) { # Accept anyway
+          o_n <- o_prop
+          v_ij <- v_ij_prop
+          alloc$r[alloc$j == fromProp] <- alloc$r[alloc$j == fromProp] - 1
+          alloc$r[alloc$j == toProp  ] <- alloc$r[alloc$j == toProp] + 1
+#           if (TRUE == verbose) print(paste("  Lower Obj Accepted"))
+        } # If we don't accept, then we retain r and o_n from the current iteration and wait for another proposal
+#         else if (TRUE == verbose) print(paste("  Lower Obj Rejected"))
+      } # End of conditional examining whether to accept the proposal
+      
     # If the current step is the best we've seen, save the results
-    if (o_n > best_o) {
-      best_s <- alloc$s_n
-      best_o <- o_n
-    }
+      if (o_n > best_o) {
+        best_r <- alloc$r
+        best_o <- o_n
+      }
 
     # Save our current results if we're at a checkpoint
-    if (i %% checkpoint == 0 ) {
-      Time <- difftime(Sys.time(), StartTime, units = "secs")
-      print(paste0("Step ", prettyNum(i, big.mark=","), ": Current vs. Best Cost: (", round(o_n,1), ", ", round(best_o,1), 
-              "), Temp (as of last rejection):",  round(temp, 3), ", Time taken: ", round(Time), ", Best State:"))
-      print(best_s); cat("\n")
-      checks$Step         <- cbind(checks$Step, i)
-      checks$StateHistory <- cbind(checks$StateHistory, best_s)
-      checks$RunTime      <- cbind(checks$RunTime, t)
-      checks$Cost         <- cbind(checks$cost, best_o)
-    }
+      if (i %% checkpoint == 0 ) {
+        Time <- difftime(Sys.time(), StartTime, units = "secs")
+        print(paste0("Step ", prettyNum(i, big.mark=","), ": Current vs. Best Obj: (", round(o_n,1), ", ", round(best_o,1), 
+                "), Temp (as of last rejection):",  round(temp, 3), ", Time taken: ", round(Time), ", Best State:"))
+        print(best_r); cat("\n")
+        checks$Step         <- cbind(checks$Step, i)
+        checks$StateHistory <- cbind(checks$StateHistory, best_r)
+        checks$RunTime      <- cbind(checks$RunTime, t)
+        checks$Obj          <- cbind(checks$obj, best_o)
+      }
 
-  }
+  } # End of loop across iterations
   
   # Output Results
-  canopyResults <- list(best_s, checks)
+  canopyResults <- list(best_r, checks)
   names(canopyResults) <- c("Best State", "CheckPoints")
   return(canopyResults)  
   

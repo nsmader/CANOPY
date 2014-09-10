@@ -70,7 +70,7 @@
   youthData <- data.frame(cbind(as.character(uP), as.character(uT)))
   rownames(youthData) <- NULL
   colnames(youthData) <- c("pov", "tract6")
-  youthData$y.id <- 1:nrow(youthData)
+  youthData$i <- 1:nrow(youthData)
 
   # Check creation.
   sum(myNs[,-1]) # Should be # of youth to be created
@@ -79,13 +79,13 @@
   crime <- read.csv("./data/raw/Violent-crimes-per-capita-by-tract.csv", header = T)
   crime$tract6 <- sprintf("%06.0f", as.numeric(crime$sTract))
   crime$cr <- crime$Pct_ViolentCrime
-  youthCrime <- merge(x=youthData[, c("y.id", "tract6", "pov")], y=crime[, c("tract6", "cr")], by="tract6")
+  youthCrime <- merge(x=youthData[, c("i", "tract6", "pov")], y=crime[, c("tract6", "cr")], by="tract6")
 
 # Load and merge census tract centroids for XY data
   # R function to calculate centroids of shapefiles http://gis.stackexchange.com/questions/43543/how-to-calculate-polygon-centroids-in-r-for-non-contiguous-shapes
   # In the end, got centroids from ArcGIS
   TractCentroids <- data.frame(read.csv(file = "./data/raw/CensusTractsTIGER2010_Centroids.csv", header = T))
-  youthGeo <- merge(x=youthCrime[,c("y.id", "tract6", "pov", "cr")], y=TractCentroids[,c("TRACTCE10", "Long", "Lat")], by.x="tract6", by.y="TRACTCE10", all = FALSE)
+  youthGeo <- merge(x=youthCrime[,c("i", "tract6", "pov", "cr")], y=TractCentroids[,c("TRACTCE10", "Long", "Lat")], by.x="tract6", by.y="TRACTCE10", all = FALSE)
   # The all = FALSE argument restricts the merge to only observations within Chicago, since that is the scope of the census tracts in the centroids file
 
 # Jitter youth locations
@@ -124,7 +124,7 @@
   save(courtGeo, file = "./data/prepped/ball-courts-geocoded.csv")
   
   courtXY <- courtGeo[!is.na(courtGeo$X), c("X", "Y")]
-  courtXY$c.id <- 1:nrow(courtGeo)
+  courtXY$j <- 1:nrow(courtGeo)
   #courtXY <- data.frame(cbind(1:nrow(courtGeo), courtGeo))
   rownames(courtXY) <- NULL
 
@@ -148,7 +148,7 @@ nKeptCombos <- 0 # This will be used to pre-allocate a data.frame that will hold
     m$d <- L1Dist_DegToMi(m$Xjit, m$Yjit, m$X, m$Y)
     keepCourts <- m$d < maxRad & !is.na(m$d)
     nKeptCombos <<- nKeptCombos + sum(keepCourts)
-    return(m[keepCourts, c("y.id", "c.id", "pov", "d", "cr")])
+    return(m[keepCourts, c("i", "j", "pov", "d", "cr")])
   }
   
   # Attempting to get preallocate and run the single job of returning results to a data.frame. This was abandoned in favor
