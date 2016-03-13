@@ -7,7 +7,7 @@
     xs_ij <- data.table(xs_ij, key="i,j")
 
   # Uniform distribution of staff
-    V_ij$s.unif <- R / J
+    V_ij$r.unif <- R / J
     bench.unif <- Obj()
 
   # Distribution of staff in rough (i.e. rounded-off) proportion to neighborhood poverty

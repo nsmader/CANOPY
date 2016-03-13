@@ -13,6 +13,8 @@
   library(plyr) # Need to use join()
   library(data.table) # To race against join() and other methods of merging tables for speed
   library(rbenchmark)
+  library(ggplot2)
+  library(ggmap)
   require(compiler)
   #enableJIT(3)
   enableJIT(0)
@@ -21,6 +23,7 @@
   "%&%" <- function(...){paste(..., sep="")}
   cn <- function(x) colnames(x)
   rn <- function(x) rownames(x)
+  p0 <- function(...) paste0(...)
 
 
 #####################
@@ -29,6 +32,9 @@
 
   nIter       <- 3e5
   nCheckPoint <- ceiling(nIter/50) # 6e3
+  subsetData <- TRUE
+    nSubsetN <- 50000
+    nSubsetJ <- 50
 
 #############################################################
 # Set Up Initialization, Objective, Neighbors and Temperature
@@ -46,15 +52,16 @@
     rownames(c2c) <- 1:J
     
   # Reduce the size of objects to practically test timing
-    iSub <- sample(i.u, 50000)
-    jSub <- sample(j.u, 50)
-    x_ij <- x_ij[x_ij$i %in% iSub, ]
-    x_ij <- x_ij[x_ij$j %in% jSub, ]
-
-    c2c <- c2c[jSub, jSub]
-    colnames(c2c) <- jSub
-    rownames(c2c) <- jSub
-    
+    if (TRUE == subsetData){
+      iSub <- sample(i.u, nSubsetN)
+      jSub <- sample(j.u, nSubsetJ)
+      x_ij <- x_ij[x_ij$i %in% iSub, ]
+      x_ij <- x_ij[x_ij$j %in% jSub, ]
+  
+      c2c <- c2c[jSub, jSub]
+      colnames(c2c) <- jSub
+      rownames(c2c) <- jSub
+    }
 
   # Reset the sizes of objects
     NC <- nrow(x_ij)
@@ -87,16 +94,17 @@
     # # # Preallocating space/precalculating objects used in the Objective call
     #----
 
-    # Precalculate what we'll need in xs_ij
-      xs_ij <- merge(x_ij, r_j, by = "j")
-      xs_ij <- within(xs_ij, {
-        xb <- -1.5 + (-1.0)*d + (-2.0)*d*cr
+    # Precalculate what we'll need in xr_ij
+      xr_ij <- merge(x_ij, r_j, by = "j")
+      xr_ij <- within(xr_ij, {
+        xb <- -1.5 + (-2.0)*d + (-2.0)*d*cr # Apply parameters of demand
         V <- exp(xb + 0.5*r)
       })
-      hist(exp(xs_ij$xb))
+      hist(exp(xr_ij$xb))
       
-      V_ij <- data.table(xs_ij[, c("i", "j", "V")], key = "i")
-      w_i <- as.matrix(unique(xs_ij[order(xs_ij$i), c("i", "w")]))
+      V_ij <- data.table(xr_ij[, c("i", "j", "d", "cr", "xb", "w", "V")], key = "i")
+      w_i <- as.matrix(unique(xr_ij[order(xr_ij$i), c("i", "w")]))
+      vW_i <- t(w_i[,2])
 
 
 #--------------------------------------#
@@ -109,7 +117,7 @@
       vSumExbs <- as.vector(sumV$V1)
       p_i <- as.vector(vSumExbs / (1 + vSumExbs))
       #table(w_i[,1] == sumV$i) # Checking that youth ids are in the same order.
-      t(w_i[,2]) %*% p_i
+      vW_i %*% p_i
     }
     benchmark(Obj(V_ij))
   
@@ -122,8 +130,12 @@
       V_ij$V[to_ij  ] <- V_ij$V[to_ij  ]*upVal
       return(V_ij)
     }
-    benchmark(updateV(V_ij, sample(j.u, 1), sample(j.u, 1))) # about 0.03 per call
+    benchmark(updateV(V_ij, sample(j.u, 1), sample(j.u, 1))) # about 0.03 per call with N = 5e5, J = 50
 
+# comp <- merge(V_ij, V_ij_0, by = c("i", "j"))
+# with(comp, table(j[V.x != V.y]))
+# table(V_ij$j[from_ij])
+# table(V_ij$j[to_ij])
 
   #----------------------------------------------#
   # # # Set Function for Selecting Neighbors # # #
@@ -131,32 +143,39 @@
 
   # Prepare inverse distances between courts
     c2c.inv <- 1/c2c
-    diag(c2c.inv) <- 0 # Otherwise, this is infinite
+    diag(c2c.inv) <- 0 # Otherwise this is infinite
     J == nrow(c2c.inv) # Check that the number of courts in court-to-court data is the same as from y2c data
 
-    GenProposal <- function(s0, TransMatrix, vLower, vUpper) {
+    GenProposal <- function(r0, TransMatrix, vLower, vUpper) {
       
       # Randomly select a courts to pull seat from
       
-        jFromElig <- s0$j[s0$r!=vLower]
+        jFromElig <- r0$j[r0$r!=vLower]
         jFrom <- sample(jFromElig, 1)
         jFromRow <- which(rn(TransMatrix) == jFrom)
       
       # Randomly select a community area to send seat to
       
-        jToElig <- s0$j[s0$r!=vUpper]
+        jToElig <- r0$j[r0$r!=vUpper]
         jToEligCols <- which(cn(TransMatrix) %in% jToElig)
         
         # XXX Could be simplified using sweep() and multinomial draws
-        vTransProbs <- TransMatrix[jFromRow, jToEligCols]/sum(TransMatrix[jFromRow, jToEligCols])
+        myTrans <- TransMatrix[jFromRow, jToEligCols]
+        vTransProbs <- myTrans/sum(myTrans)
+          # Could be done with sweep() although at present this is a very fast operation
         vCumTransProbs <- cumsum(vTransProbs)
-        jToCol <- findInterval(runif(1), vCumTransProbs)
+        jToCol <- findInterval(runif(1), vCumTransProbs) + 1
         jTo <- jToElig[jToCol]
-
+      
+        # Alternative: trying rmultinom() to get one iteration of one draw from the multinomial prob
+        # x <- jToElig[rmultinom(1, 1, myTrans) == 1]
+        # Note that this streamlines things a bit by internally normalizing the probabilities
+          # benchmark()ing this against the above gets no practical speed-up
+      
       return(list(jFrom, jTo))
     }
     system.time(for (i in 1:1000) GenProposal(r_j, TransMatrix = c2c.inv, vLowerBound, vUpperBound))
-    # s0 = r_j; TransMatrix = c2c.inv; vLower = vLowerBound; vUpper = vUpperBound
+    # r0 = r_j; TransMatrix = c2c.inv; vLower = vLowerBound; vUpper = vUpperBound
     # Run time is about 1e-5 per call. That's good.
 
   #------------------------------------------#
@@ -177,31 +196,36 @@
 # RUN ANNEALING PROCEDURE 
 #########################
 
+  V_ij_0 <- V_ij
   # debug(simulated_annealing)
   Out <- canopy(obj         = Obj,
                 alloc       = r_j,
                 v_ij        = V_ij,
+                theta       = 0.5,
                 lower       = vLowerBound,
                 upper       = vUpperBound,
                 proposal    = GenProposal,
                 transmat    = c2c.inv,
                 nudge       = updateV,
                 temperature = Temp,
-                iterations  = 3000, # nIter
-                checkpoint  =  500, # nCheckPoint
+                iterations  = 1000, # nIter
+                checkpoint  =  100, # nCheckPoint
                 verbose     = FALSE)
-  save(Out, file = "./data/out/Simulated Annealing Output", sep="")
+  
+  save(Out, file = "./output/solutions/canopy-solution -- bball, full data, 1000 iters")
 
+# Arguments for passing into debugging for CANOPY
 obj         = Obj;
 alloc       = r_j;
 v_ij        = V_ij;
+theta       = 0.5;
 lower       = vLowerBound;
 upper       = vUpperBound;
 proposal    = GenProposal;
 transmat    = c2c.inv;
 nudge       = updateV;
 temperature = Temp;
-iterations  = 15; # nIter
-checkpoint  = 3; # nCheckPoint
+iterations  = 1000; # nIter
+checkpoint  = 100; # nCheckPoint
 verbose     = FALSE
 
