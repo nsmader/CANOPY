@@ -42,10 +42,11 @@ canopy <- function(obj,
     oStar <- o_n
   
   ### Initialize checkpoints. /!\ Come back to this: initialize the full size of the object
-    checks <- list(Step = 0, RunTime = 0, rStar_n = rStar, oStar_n = oStar)
+    checks <- list(StepInfo = data.frame(Step = 0, RunTime = 0, Obj = oStar),
+                   StateHistory = data.frame(j = alloc$j, State0 = alloc$r))
     temp <- temperature(Iter = 1, MaxIter = iterations)
     StartTime <- Sys.time()
-  
+
   ### Set iterations of the algorithm
     for (i in 1:iterations) {
       
@@ -84,15 +85,18 @@ canopy <- function(obj,
       if ((i %% checkpoint) == 0 ) {
         Time <- difftime(Sys.time(), StartTime, units = "secs")
         print(paste0("Step ", prettyNum(i, big.mark=","), ": Current vs. Best Obj: (",
-                     round(o_n,1), ", ", round(oStar,1), "), Temp (as of last rejection):",
+                     round(o_n,1), ", ", round(oStar,1), "), Temp (as of last rejection): ",
                      round(temp, 3), ", Time taken: ", round(Time))) # , ", Best State:")); print(rStar)
         cat("\n")
-        checks$Step         <- cbind(checks$Step, i)
-        checks$StateHistory <- cbind(checks$StateHistory, rStar)
-        checks$RunTime      <- cbind(checks$RunTime, t)
-        checks$Obj          <- cbind(checks$obj, oStar)
+        
+        # /!\ Fix the labels of columns that get added here
+        StepInfo_i <- data.frame(Step = i, RunTime = Time, Obj = oStar)
+        StateHistory_i <- data.frame(rStar); colnames(StateHistory_i) <- paste0("State", i)
+        
+        checks$StepInfo     <- rbind(checks$StepInfo, StepInfo_i)
+        checks$StateHistory <- cbind(checks$StateHistory, StateHistory_i)
       }
-
+      
   } # End of loop across iterations
   
   # Output Results

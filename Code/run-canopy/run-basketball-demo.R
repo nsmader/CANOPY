@@ -158,7 +158,7 @@ Temp <- function(Iter, MaxIter) {
 #------------------------------------------------------------------------------#
 
 # debug(simulated_annealing)
-source("./code/run-canopy/declare-canopy-method.r")
+source("./code/run-canopy/declare-canopy-method.R")
 Out <- canopy(obj         = Obj,
               alloc       = r_j,
               v_ij        = V_ij,
