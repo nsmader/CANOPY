@@ -1,9 +1,10 @@
-########################################################################
+#------------------------------------------------------------------------------#
 #
 # SIMPLE SIMULATED ANNEALING METHOD
-#   Adapted from http://www.r-bloggers.com/simulated-annealing-in-julia/
 #
-########################################################################
+#------------------------------------------------------------------------------#
+
+# Adapted from http://www.r-bloggers.com/simulated-annealing-in-julia/
 
 # canopy()
 # Arguments:
@@ -33,21 +34,19 @@ canopy <- function(obj,
                    nudge,
                    temperature,
                    iterations,
-                   checkpoint,
-                   verbose = FALSE) {
+                   checkpoint) {
 
-  # Declare the initial state to be the best state so far.
-    best_r <- alloc$r
+  ### Declare the initial state to be the best state so far
+    rStar <- alloc$r
     o_n    <- obj(v_ij) 
-    best_o <- o_n
+    oStar <- o_n
   
-  # Initialize checkpoints. XXX Come back to this: initialize the full size of the object
-    checks <- list(0, 0, best_r, best_o)
-    names(checks) <- c("Step", "RunTime", "StateHistory", "Obj")
+  ### Initialize checkpoints. /!\ Come back to this: initialize the full size of the object
+    checks <- list(Step = 0, RunTime = 0, rStar_n = rStar, oStar_n = oStar)
     temp <- temperature(Iter = 1, MaxIter = iterations)
     StartTime <- Sys.time()
   
-  # Set iterations of the algorithm
+  ### Set iterations of the algorithm
     for (i in 1:iterations) {
       
       # Obtain a proposal, and prepare to compare it to the current state.
@@ -55,58 +54,48 @@ canopy <- function(obj,
         fromProp <- r_prop[[1]]; toProp <- r_prop[[2]]
       v_ij_prop <- nudge(v_ij, fromProp, toProp)
       o_prop    <- obj(v_ij_prop)
-#       if (TRUE == verbose) {
-#         print(alloc[, c("r", "r_prop")])
-#         print(paste0("Current Obj: ", o_n, " --- Proposed Step Obj: ", o_prop))
-#       }
       
-      # Determine whether to keep the proposal
+      ### Determine whether to keep the proposal
       if (o_prop >= o_n) { # If the move improves our objective, save the step
         o_n <- o_prop
         v_ij <- v_ij_prop
         alloc$r[alloc$j == fromProp] <- alloc$r[alloc$j == fromProp] - 1
         alloc$r[alloc$j == toProp  ] <- alloc$r[alloc$j == toProp] + 1
-#         if (TRUE == verbose) print(paste("Step ", i, "Accepted"))
       } else { # If the move increased our obj, consider acceptance
         temp <- temperature(Iter = i, MaxIter = iterations) # Note: we're only calculating the temp if we have to, i.e. if we're not improving
         p_a <- exp(-((o_n - o_prop) / temp) )
           # The argument to exp() will always be negative, ensuring probability of acceptance p_a < 1.
           # That argument is more negative as temperature decreases, as the relatively lower that o_prop is.
-          # XXX Do we want to standardize the units of difference between o_n and o_prop?
-#         if (TRUE == verbose) paste0("Step ", i, ": pr = ", p_a)
         if (runif(1) <= p_a) { # Accept anyway
           o_n <- o_prop
           v_ij <- v_ij_prop
           alloc$r[alloc$j == fromProp] <- alloc$r[alloc$j == fromProp] - 1
           alloc$r[alloc$j == toProp  ] <- alloc$r[alloc$j == toProp] + 1
-#           if (TRUE == verbose) print(paste("  Lower Obj Accepted"))
         } # If we don't accept, then we retain r and o_n from the current iteration and wait for another proposal
-#         else if (TRUE == verbose) print(paste("  Lower Obj Rejected"))
       } # End of conditional examining whether to accept the proposal
       
     # If the current step is the best we've seen, save the results
-      if (o_n > best_o) {
-        best_r <- alloc$r
-        best_o <- o_n
+      if (o_n > oStar) {
+        rStar <- alloc$r
+        oStar <- o_n
       }
 
     # Save our current results if we're at a checkpoint
-      if (i %% checkpoint == 0 ) {
+      if ((i %% checkpoint) == 0 ) {
         Time <- difftime(Sys.time(), StartTime, units = "secs")
-        print(paste0("Step ", prettyNum(i, big.mark=","), ": Current vs. Best Obj: (", round(o_n,1), ", ", round(best_o,1), 
-                "), Temp (as of last rejection):",  round(temp, 3), ", Time taken: ", round(Time), ", Best State:"))
-        print(best_r); cat("\n")
+        print(paste0("Step ", prettyNum(i, big.mark=","), ": Current vs. Best Obj: (",
+                     round(o_n,1), ", ", round(oStar,1), "), Temp (as of last rejection):",
+                     round(temp, 3), ", Time taken: ", round(Time), "\n")) # , ", Best State:")); print(rStar)
         checks$Step         <- cbind(checks$Step, i)
-        checks$StateHistory <- cbind(checks$StateHistory, best_r)
+        checks$StateHistory <- cbind(checks$StateHistory, rStar)
         checks$RunTime      <- cbind(checks$RunTime, t)
-        checks$Obj          <- cbind(checks$obj, best_o)
+        checks$Obj          <- cbind(checks$obj, oStar)
       }
 
   } # End of loop across iterations
   
   # Output Results
-  canopyResults <- list(best_r, checks)
-  names(canopyResults) <- c("Best State", "CheckPoints")
+  canopyResults <- list(BestState = rStar, CheckPoints = checks)
   return(canopyResults)  
   
 }
