@@ -50,7 +50,7 @@ canopy <- function(obj,
     for (i in 1:iterations) {
       
       # Obtain a proposal, and prepare to compare it to the current state.
-      r_prop    <- proposal(alloc, TransMatrix = transmat, vLower = lower, vUpper = upper)
+      r_prop    <- proposal(alloc, TransMatrix = transmat, lb = lower, ub = upper)
         fromProp <- r_prop[[1]]; toProp <- r_prop[[2]]
       v_ij_prop <- nudge(v_ij, fromProp, toProp)
       o_prop    <- obj(v_ij_prop)
@@ -85,7 +85,8 @@ canopy <- function(obj,
         Time <- difftime(Sys.time(), StartTime, units = "secs")
         print(paste0("Step ", prettyNum(i, big.mark=","), ": Current vs. Best Obj: (",
                      round(o_n,1), ", ", round(oStar,1), "), Temp (as of last rejection):",
-                     round(temp, 3), ", Time taken: ", round(Time), "\n")) # , ", Best State:")); print(rStar)
+                     round(temp, 3), ", Time taken: ", round(Time))) # , ", Best State:")); print(rStar)
+        cat("\n")
         checks$Step         <- cbind(checks$Step, i)
         checks$StateHistory <- cbind(checks$StateHistory, rStar)
         checks$RunTime      <- cbind(checks$RunTime, t)
