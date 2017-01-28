@@ -37,3 +37,20 @@ bench.can <- Obj()
 
 # Frame the differences in equivalent # of high-poverty youth who are now expected to be successfully
 #   targeted, at no cost, based simply on having better resources (data, demand side, algorithm) for planning
+
+#------------------------------------------------------------------------------#
+### Run CANOPY -----------------------------------------------------------------
+#------------------------------------------------------------------------------#
+
+Out <- canopy(obj         = Obj,
+              alloc       = r_j,
+              v_ij        = V_ij,
+              lower       = vLowerBound,
+              upper       = vUpperBound,
+              proposal    = GenProposal,
+              transmat    = c2c.inv,
+              nudge       = updateV,
+              temperature = Temp,
+              iterations  = 3000, # nIter  ... 3e5
+              checkpoint  =  500) # ceiling(iterations/10)
+save(Out, file = "./data/out/Simulated Annealing Output.Rda")
