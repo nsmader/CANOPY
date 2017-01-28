@@ -2,8 +2,7 @@
 #
 # TEST SIMULATED ANNEALING METHOD USING BASKETBALL PILOT
 #
-#   The objective function is to allocate seats to 
-#   even-numbered community areas.
+# The objective function is to allocate seats to communities with high priority youth
 #
 #------------------------------------------------------------------------------#
 
