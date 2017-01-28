@@ -9,16 +9,17 @@
 # canopy()
 # Arguments:
 # * obj: Function from states to the real numbers. Often called an energy function, but this algorithm works for both positive and negative costs. We're economists. Unlike engineers, I'm maximizing rather than minimizing.
-# * alloc: a mapping between facility ID and initial allocation (which is pulled out as r_0).
+# * alloc: a mapping between facility ID and initial allocation (which is pulled out as r_0)
 # * v_ij: information on current state of individual (i) valuations for alternative (j)
-# * lower, upper: Lower and upper bounds of what can feasibly allocated to each facility.
-# * proposal: Function from state to recommended swap. Produces what the Metropolis algorithm would call a proposal.
+# * theta: this is the impact of an additional unit of resource on individual valuation
+# * lower, upper: lower and upper bounds of what can feasibly allocated to each facility
+# * proposal: function from state to recommended swap. Produces what the Metropolis algorithm would call a proposal.
 # * transmat: or transition matrix, an argument to the proposal function which governs how proposals are selected
 # * nudge: this is a function that adjusts the valuations according to the proposal
-# * temperature: Function specifying the temperature at step i.
-# * iterations: Number of iterations of the algorithm that will be run. This is the only termination condition.
-# * checkpoint: Frequency, in number of interations, that the procedure will save step, run time, best state visited, best obj value obtained.
-# * keep_best: Do we return the best state visited or the last state visited? This is defaulted to true and, for now, is not offered as an option to turn off.
+# * temperature: function specifying the temperature at step i.
+# * iterations: number of iterations of the algorithm that will be run. This is the only termination condition.
+# * checkpoint: frequency, in number of interations, that the procedure will save step, run time, best state visited, best obj value obtained.
+# * keep_best: do we return the best state visited or the last state visited? This is defaulted to true and, for now, is not offered as an option to turn off.
 
 # Additional notation:
 # * r, o_n: The current state of the system, and the current value of the objective.
@@ -27,6 +28,7 @@
 canopy <- function(obj,
                    alloc,
                    v_ij,
+                   theta, 
                    lower,
                    upper,
                    proposal,
@@ -45,6 +47,7 @@ canopy <- function(obj,
     checks <- list(StepInfo = data.frame(Step = 0, RunTime = 0, Obj = oStar),
                    StateHistory = data.frame(j = alloc$j, State0 = alloc$r))
     temp <- temperature(Iter = 1, MaxIter = iterations)
+    progUpdates <- data.frame(i = 1, temp = temp, obj = o_best)
     StartTime <- Sys.time()
 
   ### Set iterations of the algorithm
@@ -55,7 +58,7 @@ canopy <- function(obj,
         fromProp <- r_prop[[1]]; toProp <- r_prop[[2]]
       v_ij_prop <- nudge(v_ij, fromProp, toProp)
       o_prop    <- obj(v_ij_prop)
-      
+
       ### Determine whether to keep the proposal
       if (o_prop >= o_n) { # If the move improves our objective, save the step
         o_n <- o_prop
@@ -95,6 +98,16 @@ canopy <- function(obj,
         
         checks$StepInfo     <- rbind(checks$StepInfo, StepInfo_i)
         checks$StateHistory <- cbind(checks$StateHistory, StateHistory_i)
+      }
+      if (i*10 %% checkpoint == 0){ # Generates progress reports at 10x frequency of checkpoint
+        progUpdates <- rbind(progUpdates, c(1, temp, o_n))
+        tempProg <- ggplot(progUpdates, aes(x = iter, y = temp)) + geom_line(colour = black) +
+          ggtitle("Degree of Experiementation(i.e. Temperature)\nby Step ofthe Optimizer") + xlab("Step of Optimizer")
+        objProg  <- ggplot(progUpdates, aes(x = iter, y = obj)) + geom_line(colour = black) +
+          ggtitle("Degree of Experiementation(i.e. Temperature)\nby Step ofthe Optimizer") + xlab("Step of Optimizer") +
+          abline(intercept = o_unif, slope = 0, colour = blue, linetype = dashed) +
+          abline(intercept = o_pov, slope = 0, colour = blue, linetype = dashed) +
+          abline(intercept = o_pop, slope = 0, colour = blue, linetype = dashed)
       }
       
   } # End of loop across iterations
