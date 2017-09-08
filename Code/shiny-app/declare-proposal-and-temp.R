@@ -7,7 +7,7 @@
 ### Establish the Objective Function -------------------------------------------
 
 ### The objective is a weighted sum of the probability that each youth participates in any park
-Obj <- function(V_ij){
+Obj <- function(V_ij, w_i){
   sumV <- V_ij[, sum(eV), by = i]
   vSumExbs <- as.vector(sumV$V1)
   p_i <- as.vector(vSumExbs / (1 + vSumExbs))
@@ -23,6 +23,14 @@ updateV <- function(V_ij, jFrom, jTo){
   V_ij[j == jTo,   eV := eV*upVal]
   return(V_ij)
 }
+
+
+### Set Function for Selecting Neighbors ---------------------------------------
+
+### Prepare inverse distances between courts
+c2c.inv <- 1/c2c
+diag(c2c.inv) <- 0 # Otherwise, this is infinite
+J == nrow(c2c.inv) # Check that the number of courts in court-to-court data is the same as from y2c data
 
 
 ### Establish the Proposal Function --------------------------------------------
@@ -50,6 +58,7 @@ GenProposal <- function(r0, TransMatrix, lb, ub) {
   
   return(list(jFrom, jTo))
 }
+
 
 ### Establish a Temperature Function -------------------------------------------
 

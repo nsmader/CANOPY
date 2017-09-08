@@ -1,0 +1,305 @@
+---
+title: "Demonstration of Choice Analysis"
+author: "Nick Mader, Chapin Hall at the University of Chicago (nmader@chapinhall.org)"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(MASS)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(ggplot2)
+library(scales)
+
+cn <- function(x) colnames(x)
+grepv <- function(p, x) grep(pattern = p, x = x, value = TRUE, ...)
+
+# /!\ Note presence of "technical-notes-on-inference-with-capacity-constraints"
+# in the CANOPY repository
+
+#------------------------------------------------------------------------------#
+### GENERATE DATA --------------------------------------------------------------
+#------------------------------------------------------------------------------#
+
+# Generate individuals and locations -------------------------------------------
+N <- 100
+J <- 10
+set.seed(5004)
+
+d_i <- 
+  data.frame(ind_id = 1:N,
+             group = sample(c("Treble", "Bass"),
+                            size = N, replace = TRUE, prob = c(0.6, 0.4))) %>%
+  within({
+    test_score <-
+      round(pmin(pmax(rnorm(N, mean = 70, sd = 10),
+                      0),
+                 100),
+            0)
+    test_score[group == "Bass"] <-
+      round(pmin(pmax(rnorm(sum(group == "Bass"), mean = 80, sd = 7),
+                      0),
+                 100),
+            0)
+  })
+  
+
+d_j <-
+  data.frame(fac_id = LETTERS[1:J],
+             fac_type = sample(c("Low", "High"),
+                               size = J, replace = TRUE, prob = c(0.8, 0.2))) %>%
+  within(fe <- rnorm(J))
+
+### Draw locations -------------------------------------------------------------
+Draw2DLoc <- function(n, mu, vcv){
+  draw <- matrix(mvrnorm(n = n, mu = mu, Sigma = vcv), ncol = 2)
+  coord <- data.frame(draw)
+  colnames(coord) <- c("x", "y")
+  return(coord)
+}
+
+### Draws for individuals
+loc_i <-
+  Draw2DLoc(N,
+            mu = c(0.0, 0.0),
+            vcv = matrix(c(1.0, 0.3,
+                           0.3, 1.0), nrow = 2))
+loc_i[d_i$group == "Bass", ] <- 
+  Draw2DLoc(n = sum(d_i$group=="Bass"),
+            mu = c(1.0, -1.0),
+            vcv = matrix(c( 1.5, -0.4,
+                           -0.4,  1.5), nrow = 2))
+d_i <- cbind(d_i, loc_i)
+
+### Draws for facilities
+loc_j <- 
+  Draw2DLoc(n = J,
+            mu = c(0.0, 0.0),
+            vcv = diag(c(0.5, 0.5)))
+loc_j[d_j$fac_type == "High", ] <-
+  Draw2DLoc(n = sum(d_j$fac_type == "High"),
+            mu = c(1.0, -1.0),
+            vcv = diag(c(1.0, 1.0)))
+d_j <- cbind(d_j, loc_j)
+
+# /!\ Consider moving this data generation code to its own script
+#     If doing so, consider merging this data prep with that which feeds the technical paper
+
+### Calculate travel distances -------------------------------------------------
+
+loc_ij <- rbind(dplyr::select(d_i, x, y),
+                dplyr::select(d_j, x, y))
+dist_i.j <- as.matrix(dist(loc_ij, diag = TRUE)) %>%
+  data.frame()
+ids <- c(d_i$ind_id, as.character(d_j$fac_id))
+colnames(dist_i.j) <- ids
+dist_ij <- 
+  gather(dist_i.j, "to", "dist") %>%
+  within(from <- ids) %>%
+  filter(from %in% d_i$ind_id,
+         to   %in% d_j$fac_id)
+
+### Generate valuations and likelihood -----------------------------------------
+
+d_ij <-
+  merge(dplyr::select(d_i, -x, -y),
+        dplyr::select(d_j, -x, -y)) %>%
+  merge(dist_ij,
+        by.x = c("ind_id", "fac_id"),
+        by.y = c("from", "to")) %>%
+  within({
+    v <-
+      -12.0 +
+      -1.0*dist - 0.1*dist^2 +
+       0.1*test_score + 
+       2.0*(group == "Bass") + 
+       1.0*(group == "Treble")*(fac_type == "High") +
+       exp(fe) +
+      rlogis(N)
+  }) %>%
+  group_by(ind_id) %>%
+  mutate(vmax = max(v),
+         bVmax = v == vmax,
+         bChoice = bVmax & vmax > 0)
+
+c_i <-
+  d_ij %>%
+    summarize(bChose = sum(bChoice),
+              vmax = mean(vmax)) %>%
+    ungroup() %>%
+    summarize(pctChose = mean(bChose))
+if (FALSE){
+  hist(d_ij$v)
+  c_i 
+}
+
+```
+
+# Introduction
+
+While many policy makers and practitioners are focused the impact of a social program,
+it is less often that they are concerned about factors that lead to accessibility of those
+programs, for however impactful they are. But naturally, a program cannot be impactful for
+those that do not/are not able to take up its services.
+
+<!-- Not sure if this exposition is helpful...
+Speaking broadly, analyses of program impacts are often undertaken to be generalizable--e.g. to determine the value of pre-K programming, the impact of alternative incarceration programs on recidivism, or the contribution of literacy programs on reading--from one study setting to inform decision-making in another time and/or place. -->
+
+This memo uses mock data to demonstrate a representative set of issues--and solutions--in the question of how individuals take up services in a given program. We take a setup that we suggest is canonical, of a number of individuals with different characteristics from qualitatively different groups who are differentially distributed across geography, and a number of program "facilities" which offer different types of programming, are differentially located across geographies, and may be of different levels of desirability to individuals.
+
+Across these individuals and facilities, we examine who chooses, what gets chosen,
+what factors seems to drive that choice, and how choice patterns might respond to
+changes in either choice options or how choices are made. We conclude with a reflection
+on ways that this type of quantitative analysis can--and must, with great potential payoffs--
+be complemented with qualitative investigations and practitioner expertise.
+
+
+# Overview of Individual and Facility Data
+
+```{r tab indv types}
+d_i %>%
+  group_by(group) %>%
+  summarize(`#` = n())
+```
+
+Test score is on a scale from 0 to 100 and, in practice, ranges from `r min(d_i$testscore)` to `r max(d_i$test_score)` in our data set. However, there is a broad distribution of values, which differ somewhat by individual group type. The "smoothed" histogram below shows, in each of its bell-shaped curves, the relative number of individuals who have a given test score. Below, we see that individuals in the "Bass" group tend to have higher test scores, and to be concentrated at a relatively narrow range of values from about 70 to 90, whereas individuals in the "Treble" group represent a generally wider set of groups.
+
+```{r }
+ggplot(data = d_i, aes(x = test_score, colour = group)) + 
+  geom_density(size = 1.0) +
+  labs(title = "'Smoothed' Histogram of Test Scores, by Individual Group",
+       x = "Test Score", y = "Relative Number of Individuals\nwith Given Test Score") +
+  scale_y_continuous(breaks = NULL) +
+  scale_colour_manual(name = "Group", values = c("blue", "green")) +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        axis.text = element_text(size = 12))
+
+```
+
+
+```{r Summarize facility data}
+
+```
+
+Below, the map of our data shows that... proximity ... who chooses ... those who make choices
+are those who are generally closer to facilities...
+
+<!-- It's worth pointing out (in a footnote?) here that it's pretty difficult to show all relevant information: it's hard to show who chose what, what their characteristics are, what different characteristics of facilities might be. In general, we're limited by 2D space, and signifiers of shape/size/color/pattern. Arguably, one of the essential benefits of data analysis is the fact that math and statics can translate human questions and intuition to application to many more dimensions and more information than we can process, and come back with distillations that can be translated back into human reasoning. -->
+
+<!-- Could choices be represented with arrows? -->
+
+```{r Show map of locations}
+ggplot() +
+  geom_point(data = d_i, aes(x = x, y = y, color = group)) +
+  geom_point(data = d_j, aes(x = x, y = y, size = fac_type)) +
+  labs(title = "Locations of Individuals and Facilities",
+       x = "", y = "") +
+  scale_x_continuous(breaks = NULL) +
+  scale_y_continuous(breaks = NULL) +
+  theme_minimal() + 
+  theme(legend.position = "bottom")
+  #theme_void()
+
+# /!\ Want to figure out how to create different shapes, and filled/unfilled
+#     markers by whether an individual has made a choice
+```
+
+# Basic Analysis
+
+We begin by describing several aspects of choice patterns in our mock data set. This prepares us for--and in fact motivates the need for--the more involved statistical analysis which follows.
+
+```{r perform basic analysis}
+pctC_g <- 
+  d_ij %>%
+  group_by(ind_id, group) %>%
+  summarize(bChose = sum(bChoice))
+
+pctHigh <-
+  d_ij %>%
+  filter(bChoice == TRUE) %>%
+  ungroup() %>%
+  summarize(bHigh = mean(fac_type == "High"))
+nHigh <- sum(d_j$fac_type == "High")
+```
+
+Overall, `r sprintf("%.0f%%", 100*mean(c_i$bChose))` of individuals made a choice. Of those who made a choice, `r sprintf("%.0f%%", 100*pctHigh$bHigh)` made a choice of a "High" type facility. (Note that `r nHigh` of the `r J` facilities--or roughly `r sprintf("%.0f%%", 100*(nHigh/J))`--were High type overall.)
+
+However, individuals in different groups made different types of choices.
+
+```{r choices by group}
+d_ij %>%
+  group_by(ind_id, group) %>%
+  summarize(bChose = max(bChoice)) %>%
+  group_by(group) %>%
+  summarize(`% Who Chose` = sprintf("%.0f%%", 100*mean(bChose)))
+```
+
+Not only that, but individuals in different groups have different *access* to different types of facilities.
+
+```{r test scores of those who chose}
+
+```
+
+The facilities were each chosen by different numbers of individuals 
+
+Summarizing the observations above: we need a way to systematically separate supply explanations from demand in studying factors in choice.
+
+# Full Analysis
+
+## Separating Supply and Demand Factors
+
+This analysis learns from both what choices are and *are not* made. For example, it is telling if an individual has the option to choose a nearby facility but does not. Perhaps distance is not a factor for them and other options interest them, perhaps the type of that particular facility is not of interest, or perhaps something about that individual makes them unlikely to make a choice in general. This analysis examines literally every choice that is made--and not made--by each individual to deliver an assessment of how much each factor--facility type, individual characteristics, locational accessibility, and combinations of all of the above--influence the likelihood of a given choice being made.
+
+
+
+```{r run conditional logit}
+# /!\ Add rows for "no choice"
+# /!\ Look into removing almost-zero probability combinations to speed estimation run
+
+clog <- 
+  clogit(bChoice ~
+           dist + I(dist*2) + test_score + group + fac_type + fac_id,
+         data = d_ij)
+```
+
+## Running 'What-If?' Scenarios
+
+The above statistical analysis provides us with the rudiments that can now be used to assess "What-If?" scenarios. These assessments can help us more intuitively understand the overall impact of any given type of factor in choice outcomes, and help imagine how policymakers can most effectively intervee to provide a better result. Below, we examine
+
+### What if individual decision-making could be influenced?
+
+What would choice patterns look like if each individual group make selections as
+if they were "Treble" type?
+
+...if they were "Bass" type?
+
+```{r}
+
+```
+
+### What if accessibility were equalized?
+
+What would choice patterns look like if "Bass" group individuals had the same level of
+access as "Treble" group individuals did?
+
+## Beyond the Data
+
+
+
+The statistical analysis also allows us to examine and, critically, separate the
+ways that factors
+
+<!-- Idea here is that we know certain facilities are more and less attractive. Answering why is a matter of  -->
+
+
+# Reflection
+
+
+<!-- other means of inquiry -->

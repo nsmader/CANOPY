@@ -4,7 +4,7 @@
 #
 #------------------------------------------------------------------------------#
 
-# Adapted from http://www.r-bloggers.com/simulated-annealing-in-julia/
+# Originally adapted from http://www.r-bloggers.com/simulated-annealing-in-julia/
 
 # canopy()
 # Arguments:
@@ -38,9 +38,11 @@ canopy <- function(obj,
                    iterations,
                    checkpoint) {
 
+  set.seed(60637) # Setting this so that each run with equivalent settings will be the same
+  
   ### Declare the initial state to be the best state so far
     rStar <- alloc$r
-    o_n    <- obj(v_ij) 
+    o_n   <- obj(v_ij) 
     oStar <- o_n
   
   ### Initialize checkpoints. /!\ Come back to this: initialize the full size of the object
@@ -55,7 +57,7 @@ canopy <- function(obj,
       
       # Obtain a proposal, and prepare to compare it to the current state.
       r_prop    <- proposal(alloc, TransMatrix = transmat, lb = lower, ub = upper)
-        fromProp <- r_prop[[1]]; toProp <- r_prop[[2]]
+      fromProp  <- r_prop[[1]]; toProp <- r_prop[[2]]
       v_ij_prop <- nudge(v_ij, fromProp, toProp)
       o_prop    <- obj(v_ij_prop)
 
@@ -69,7 +71,7 @@ canopy <- function(obj,
         temp <- temperature(Iter = i, MaxIter = iterations) # Note: we're only calculating the temp if we have to, i.e. if we're not improving
         p_a <- exp(-((o_n - o_prop) / temp) )
           # The argument to exp() will always be negative, ensuring probability of acceptance p_a < 1.
-          # That argument is more negative as temperature decreases, as the relatively lower that o_prop is.
+          # That argument is more negative as temperature decreases, corresponding with lower values of o_prop
         if (runif(1) <= p_a) { # Accept anyway
           o_n <- o_prop
           v_ij <- v_ij_prop
@@ -88,12 +90,11 @@ canopy <- function(obj,
       if ((i %% checkpoint) == 0 ) {
         Time <- difftime(Sys.time(), StartTime, units = "secs")
         print(paste0("Step ", prettyNum(i, big.mark=","), ": Current vs. Best Obj: (",
-                     round(o_n,1), ", ", round(oStar,1), "), Temp (as of last rejection): ",
+                     round(o_n, 1), ", ", round(oStar, 1), "), Temp (as of last rejection): ",
                      round(temp, 3), ", Time taken: ", round(Time))) # , ", Best State:")); print(rStar)
         cat("\n")
-        
-        # /!\ Fix the labels of columns that get added here
-        StepInfo_i <- data.frame(Step = i, RunTime = Time, Obj = oStar)
+    
+        StepInfo_i     <- data.frame(Step = i, RunTime = Time, Obj = oStar)
         StateHistory_i <- data.frame(rStar); colnames(StateHistory_i) <- paste0("State", i)
         
         checks$StepInfo     <- rbind(checks$StepInfo, StepInfo_i)
@@ -101,13 +102,18 @@ canopy <- function(obj,
       }
       if (i*10 %% checkpoint == 0){ # Generates progress reports at 10x frequency of checkpoint
         progUpdates <- rbind(progUpdates, c(1, temp, o_n))
-        tempProg <- ggplot(progUpdates, aes(x = iter, y = temp)) + geom_line(colour = black) +
-          ggtitle("Degree of Experiementation(i.e. Temperature)\nby Step ofthe Optimizer") + xlab("Step of Optimizer")
-        objProg  <- ggplot(progUpdates, aes(x = iter, y = obj)) + geom_line(colour = black) +
-          ggtitle("Degree of Experiementation(i.e. Temperature)\nby Step ofthe Optimizer") + xlab("Step of Optimizer") +
-          abline(intercept = o_unif, slope = 0, colour = blue, linetype = dashed) +
-          abline(intercept = o_pov, slope = 0, colour = blue, linetype = dashed) +
-          abline(intercept = o_pop, slope = 0, colour = blue, linetype = dashed)
+        tempProg <-
+          ggplot(progUpdates, aes(x = iter, y = temp)) +
+            geom_line(colour = black) +
+            ggtitle("Degree of Experiementation(i.e. Temperature)\nby Step ofthe Optimizer") +
+            xlab("Step of Optimizer")
+          objProg <- 
+            ggplot(progUpdates, aes(x = iter, y = obj)) + geom_line(colour = black) +
+            ggtitle("Degree of Experiementation(i.e. Temperature)\nby Step ofthe Optimizer") +
+            xlab("Step of Optimizer") +
+            abline(intercept = o_unif, slope = 0, colour = blue, linetype = dashed) +
+            abline(intercept = o_pov,  slope = 0, colour = blue, linetype = dashed) +
+            abline(intercept = o_pop,  slope = 0, colour = blue, linetype = dashed)
       }
       
   } # End of loop across iterations
