@@ -46,24 +46,25 @@ shinyUI(fluidPage(
         ),
         tabPanel(
           h3("Map of Recommended Allocation"),
-          plotOutput(plot(runif(10), runif(10), asp = 1)),
+          plotOutput("objPlot"),
           p("This is a plot note.")
         )
       )
     )
-  ), # End of sidebar layout for the top half
+  )
+  , # End of sidebar layout for the top half
   
   ### Fluid Rows for the Bottom Half with Post-run Displays
-  # Display run progress
+  # # Display run progress
   fluidRow(
     column(width = 3,
            h2("Run Progress")),
     column(width = 9,
-           plotOutput("objPlot"))
+           tableOutput("weights"))
   ),
   fluidRow(
     column(width = 6,
-           plotOutput("objPlot")),
+           plotOutput("objPlot2")),
     column(width = 6,
            h2("Run Benchmarks"),
            h3(paste("<b>Benchmark 1</b>",
@@ -73,7 +74,8 @@ shinyUI(fluidPage(
                     "This is the target score that would result from allocating
                      resources according to Y",
                     sep = "</br>")))
-  ),
+  )
+  ,
   fluidRow(
     column(width = 3,
            h2("Table Output"),

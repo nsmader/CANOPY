@@ -16,6 +16,7 @@ Obj <- function(V_ij, w_i){
 }
 
 ### Set a function to adjust the valuations according to the proposed change to the state
+# This is an optimized function to value resource adjustments during the CANOPY run
 # jFrom <- sample(j.u, 1); jTo <- sample(j.u, 1)
 upVal <- exp(+1*0.5); downVal <- exp(-1*0.5)
 updateV <- function(V_ij, jFrom, jTo){
@@ -23,6 +24,20 @@ updateV <- function(V_ij, jFrom, jTo){
   V_ij[j == jTo,   eV := eV*upVal]
   return(V_ij)
 }
+
+### Set Function for Updating V with full R list 
+# While less optimized than updateV, this is simpler to value a full sample
+# benchmark
+UpdateVR <- function(x, r_j){
+  V <-
+    merge(x, r_j, by = "j") %>%
+    within({
+      eV <- exp(xb + 0.5*r)
+    })[, .(i, j, eV)] %>%
+    setKey(i)
+  return(V)
+}
+
 
 
 ### Set Function for Selecting Neighbors ---------------------------------------

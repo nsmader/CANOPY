@@ -10,13 +10,13 @@
 # Arguments:
 # * obj: Function from states to the real numbers. Often called an energy function, but this algorithm works for both positive and negative costs. We're economists. Unlike engineers, I'm maximizing rather than minimizing.
 # * alloc: a mapping between facility ID and initial allocation (which is pulled out as r_0)
-# * v_ij: information on current state of individual (i) valuations for alternative (j)
+# * v_ij: information on current state of individual (i) valuation's for alternative (j)
 # * theta: this is the impact of an additional unit of resource on individual valuation
 # * lower, upper: lower and upper bounds of what can feasibly allocated to each facility
 # * proposal: function from state to recommended swap. Produces what the Metropolis algorithm would call a proposal.
 # * transmat: or transition matrix, an argument to the proposal function which governs how proposals are selected
 # * nudge: this is a function that adjusts the valuations according to the proposal
-# * temperature: function specifying the temperature at step i.
+# * temperature: function specifying the temperature at step i
 # * iterations: number of iterations of the algorithm that will be run. This is the only termination condition.
 # * checkpoint: frequency, in number of interations, that the procedure will save step, run time, best state visited, best obj value obtained.
 # * keep_best: do we return the best state visited or the last state visited? This is defaulted to true and, for now, is not offered as an option to turn off.
@@ -67,6 +67,7 @@ canopy <- function(obj,
         v_ij <- v_ij_prop
         alloc$r[alloc$j == fromProp] <- alloc$r[alloc$j == fromProp] - 1
         alloc$r[alloc$j == toProp  ] <- alloc$r[alloc$j == toProp] + 1
+          # /!\ Seems like this could be done with a set() using data.table
       } else { # If the move increased our obj, consider acceptance
         temp <- temperature(Iter = i, MaxIter = iterations) # Note: we're only calculating the temp if we have to, i.e. if we're not improving
         p_a <- exp(-((o_n - o_prop) / temp) )
@@ -105,15 +106,15 @@ canopy <- function(obj,
         tempProg <-
           ggplot(progUpdates, aes(x = iter, y = temp)) +
             geom_line(colour = black) +
-            ggtitle("Degree of Experiementation(i.e. Temperature)\nby Step ofthe Optimizer") +
+            ggtitle("Degree of Experimentation(i.e. Temperature)\nby Step ofthe Optimizer") +
             xlab("Step of Optimizer")
-          objProg <- 
-            ggplot(progUpdates, aes(x = iter, y = obj)) + geom_line(colour = black) +
-            ggtitle("Degree of Experiementation(i.e. Temperature)\nby Step ofthe Optimizer") +
-            xlab("Step of Optimizer") +
-            abline(intercept = o_unif, slope = 0, colour = blue, linetype = dashed) +
-            abline(intercept = o_pov,  slope = 0, colour = blue, linetype = dashed) +
-            abline(intercept = o_pop,  slope = 0, colour = blue, linetype = dashed)
+        objProg <- 
+          ggplot(progUpdates, aes(x = iter, y = obj)) + geom_line(colour = black) +
+          ggtitle("Degree of Experiementation(i.e. Temperature)\nby Step ofthe Optimizer") +
+          xlab("Step of Optimizer") +
+          abline(intercept = bench.unif, slope = 0, colour = blue, linetype = dashed) +
+          abline(intercept = bench.pov,  slope = 0, colour = blue, linetype = dashed) +
+          abline(intercept = bench.pop,  slope = 0, colour = blue, linetype = dashed)
       }
       
   } # End of loop across iterations

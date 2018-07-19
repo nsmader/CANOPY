@@ -28,7 +28,7 @@ x_ij <- x_ij[i %in% iSub]
 x_ij <- x_ij[j %in% jSub]
 
 ### Set up base xb
-x_ij <- within(x_ij, xb <- -1.5 + (-1.0)*d + (-2.0)*d*cr)
+x_ij[, xb := -1.5 + (-1.0)*d + (-2.0)*d*cr]
 
 c2c <- c2c[jSub, c(jSub), with = FALSE]
 
@@ -43,17 +43,4 @@ J <- length(j.u)
 c2c.inv <- 1/c2c
 diag(c2c.inv) <- 0 # Otherwise, this is infinite
 J == nrow(c2c.inv) # Check that the number of courts in court-to-court data is the same as from y2c data
-
-
-### Set Function for Updating V with full R list -------------------------------
-
-UpdateVR <- function(x, r_j){
-  V <-
-    merge(x, r_j, by = "j") %>%
-    within({
-      eV <- exp(xb + 0.5*r)
-    })[, .(i, j, eV)] %>%
-    setKey(i)
-  return(V)
-}
 
