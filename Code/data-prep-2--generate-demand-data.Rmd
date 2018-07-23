@@ -1,0 +1,29 @@
+---
+title: "Generate Application Data for Pilot"
+author: "Nick Mader"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+load("../../data/prepped/youth-and-court-data.Rda")
+
+package.list <- c("dplyr", "tidyr", "data.table", "stringr", "ggplot2", "scales")
+for (p in package.list){
+  if (!p %in% installed.packages()[, "Package"]) install.packages(p)
+  library(p, character.only = TRUE)
+}
+grepv <- function(p, x, ...) grep(p, x, value = TRUE, ...)
+cn <- function(x) colnames(x)
+```
+
+# Background
+
+The script below maps the mock data on youth and our basketball programs into demand data, governed by a selection on preference parameters. These functions will be used to summarize patterns of youth engagement, and imagine how youth engagement changes as supply changes.
+
+# Set Parameters of Engagement
+
+```{r}
+
+```
+

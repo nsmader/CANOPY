@@ -18,10 +18,6 @@ for (p in package.list){
 }
 grepv <- function(p, x, ...) grep(p, x, value = TRUE, ...)
 cn <- function(x) colnames(x)
-f.to.c <- function(f){ return(levels(f)[f]) }
-f.to.n <- function(f){ return(as.numeric(levels(f)[f])) }
-source("code/helper-functions/geocode-addr.R")
-source("code/helper-functions/get-centroids.R")
 
 #------------------------------------------------------------------------------#
 ### Pull ACS data on youth -----------------------------------------------------
@@ -37,8 +33,10 @@ source("code/helper-functions/get-centroids.R")
 ### Read and install Census API key, and pull full table
 # Note, this must be applied for at the Census API developer's page at:
 #   https://api.census.gov/data/key_signup.html
-key <- readLines(con = "Code/key.txt")
-api.key.install(key = key)
+key <- readLines(con = "Code/key/key.txt")
+if (FALSE){
+  api.key.install(key = key) # This only needs to be installed once  
+}
 myGeo <- geo.make(state = "IL", county = "Cook County", tract = "*")
 
 ### Pull and clean poverty by race numbers ------------------------------------#
@@ -60,6 +58,7 @@ for (s in suffix){
     mutate(geoid = rownames(pov_r),
            race = names(suffix)[which(s == suffix)])
   povRNs <- rbind(povRNs, pov_r)  
+  rm(pull)
 }
 povRNs_w <-
   povRNs %>% 
@@ -141,11 +140,11 @@ dt_i[povInt == "ge200", round(prop.table(table(race)), 2)]
 
 ### Read shapefiles -----------------------------------------------------------#
 
-tr      <- readOGR(dsn = "data/raw", layer = "CensusTractsTIGER2010")
-tr_cent <- readOGR(dsn = "data/raw", layer = "CensusTractsTIGER2010_Centroids")
-  # R function to calculate centroids of shapefiles
-  #   http://gis.stackexchange.com/questions/43543/how-to-calculate-polygon-centroids-in-r-for-non-contiguous-shapes
-  # The centroids above were generated through manual calculation using QGIS
+tr      <- readOGR(dsn = "data/raw", layer = "CensusTractsTIGER2010_cook")
+tr <- spTransform(tr, CRS("+init=epsg:4326")) # This converts the XY coordinates to lat/long
+
+tr_cent_chi <- readOGR("data/raw", "Chicago_CensusTracts_2010_Centroids")
+chiTracts <- unique(tr_cent_chi@data$TRACTCE10)
 
 ### Pull 2015 crime incident data from the Chicago data portal ----------------#
 
@@ -153,9 +152,10 @@ cr <- read.socrata(url = "https://data.cityofchicago.org/resource/vwwp-7yr9.json
 viol <- 
   data.table(cr) %>%
   .[fbi_code %in% c("01A", "02", "03", "04A", "04B")] %>%
-  .[, .(x = as.numeric(x_coordinate),
-        y = as.numeric(y_coordinate))] %>% # choosing x/y coords since that matches the tract shape files
-  filter(!is.na(x) & !is.na(y))
+  .[, .(lon = as.numeric(location.longitude),
+        lat = as.numeric(location.latitude))] %>% # choosing x/y coords since that matches the tract shape files
+  filter(!is.na(lat), !is.na(lon))
+rm(cr)
 viol_sp <- SpatialPoints(coords = viol)
 proj4string(viol_sp) <- proj4string(tr)
 
@@ -164,9 +164,10 @@ proj4string(viol_sp) <- proj4string(tr)
 viol_t <- 
   over(viol_sp, tr) %>%
   data.table() %>%
-  .[, .(nViol = .N, tract = TRACTCE10), by = TRACTCE10] %>% 
+  .[, .(nViol = .N, tract = TRACTCE), by = TRACTCE] %>% 
   merge(totNs, by = "tract", all.y = TRUE) %>% 
-  .[, viol_1k := ifelse(tot==0 | is.na(TRACTCE10), 0, nViol/tot*1000)]
+  .[, viol_1k := ifelse(tot==0 | is.na(TRACTCE), 0, nViol/tot*1000)] %>%
+  .[tract %in% chiTracts]
 
 #------------------------------------------------------------------------------#
 ### Finish youth-level data set ------------------------------------------------
@@ -174,15 +175,17 @@ viol_t <-
 
 ### Merge together youth-level data and tract-level data ----------------------#
 dt_it <- 
-  merge(dt_i, 
-        viol_t[, .(tract, TRACTCE10, viol_1k)], 
+  merge(dt_i,
+        tr@data %>%
+          mutate(lat = as.numeric(as.character(INTPTLAT)),
+                 lon = as.numeric(as.character(INTPTLON))) %>% # The "interpolated" lat and lon are centroid coords
+          select(tract = TRACTCE, lat_i = lat, lon_i = lon),
         by = "tract",
-        all.x = TRUE) %>%
-  merge(select(tr_cent@data, TRACTCE10, lat = Lat, lon = Long),
-        by = "TRACTCE10",
-        all.y = TRUE) %>% # The all.y = TRUE restricts the sample to just Chicago
-  .[, .(i, race = factor(race), gender = factor(race), age = factor(age),
-        povInt = factor(povInt), viol_1k, tract, lat, lon)]
+        all.y = TRUE) %>%
+  .[, .(i, race = factor(race), gender = factor(gender), age = factor(age),
+        povInt = factor(povInt), tract, lat_i, lon_i)] %>% 
+  .[tract %in% chiTracts]
+rm(dt_i)
 
 ### Jitter youth locations ----------------------------------------------------#
 # Will jitter youth by up to a 1/2 mile
@@ -193,18 +196,21 @@ mi.per.degLat  <- 69; degLat.per.mi  <- 1/mi.per.degLat
 mi.per.degLong <- 53; degLong.per.mi <- 1/mi.per.degLong
 pctMiJit <- 0.5
 N <- nrow(dt_it)
-dt_it[, `:=`(lat_jit = lat + runif(N, min = -pctMiJit/2, max = pctMiJit/2)*degLat.per.mi,
-             lon_jit = lon + runif(N, min = -pctMiJit/2, max = pctMiJit/2)*degLong.per.mi)]
-dt_it[, cor(lat, lat_jit)]
-dt_it[, `:=`(lat = lat_jit, lon = lon_jit, lat_jit = NULL, lon_jit = NULL)]
+dt_it[, `:=`(lat_jit = lat_i + runif(N, min = -pctMiJit/2, max = pctMiJit/2)*degLat.per.mi,
+             lon_jit = lon_i + runif(N, min = -pctMiJit/2, max = pctMiJit/2)*degLong.per.mi)]
+dt_it[, cor(lat_i, lat_jit)]
+dt_it[, `:=`(lat_i = lat_jit, lon_i = lon_jit, lat_jit = NULL, lon_jit = NULL)]
 
 #------------------------------------------------------------------------------#
 ### Load and geocode basketball court data -------------------------------------
 #------------------------------------------------------------------------------#
 
+# Read data
 d_c <-
   read.csv("data/raw/ball-courts.csv", header = TRUE, stringsAsFactors = FALSE) %>%
   within(Address <- paste(Street.Address, City, State, sep = ", "))
+
+# Geocode and combine information
 ll_c <- geocode(d_c$Address, output = "latlon")
 dll_c <-
   cbind(d_c, ll_c) %>%
@@ -212,7 +218,16 @@ dll_c <-
   mutate(j = row_number()) %>%
   select(j, park = Park, lat, lon)
 
-write.csv(dll_c, file = "data/prepped/ball-courts-geocoded.csv")
+c_sp <- SpatialPoints(coords = dll_c[, c("lon", "lat")])
+proj4string(c_sp) <- CRS(proj4string(tr))
+
+dt_c <- 
+  over(c_sp, tr) %>%
+  cbind(dll_c, .) %>%
+  select(j, park, lat_j = lat, lon_j = lon, tract = TRACTCE) %>%
+  filter(tract %in% chiTracts) %>% 
+  merge(viol_t %>% select(tract, viol_1k), by = "tract", all.x = TRUE) %>% 
+  data.table()
 
 #------------------------------------------------------------------------------#
 ### Calculate Distances --------------------------------------------------------
@@ -226,35 +241,49 @@ L1Dist_DegToMi <- function(o.x, o.y, d.x, d.y){
 ### Calculate court-to-court distances ----------------------------------------#
 # Merge to generate all permutations and calculate long-version
 dist_cc <- 
-  merge(dll_c, dll_c, by = NULL) %>% 
-  mutate(dist = L1Dist_DegToMi(lat.x, lon.x, lat.y, lon.y)) %>%
-  select(j.x, j.y, dist) %>%
+  CJ.dt(dt_c, dt_c) %>% 
+  mutate(dist = L1Dist_DegToMi(lat_j, lon_j, i.lat_j, i.lon_j)) %>%
+  select(j1 = j, j2 = i.j, dist) %>%
   data.table()
 
 # Generate a square matrix with the same information
 c2c.dist <- function(c1, c2){
-  L1Dist_DegToMi(dll_c$lat[c1], dll_c$lon[c1], dll_c$lat[c2], dll_c$lon[c2])
+  L1Dist_DegToMi(dt_c$lat[c1], dt_c$lon[c1], dt_c$lat[c2], dt_c$lon[c2])
 }
-J <- nrow(dll_c)
+J <- nrow(dt_c)
 dist_c.c <- matrix(mapply(c2c.dist, rep(1:J, each=J), rep(1:J, times=J)), nrow=J)
 
 ### Calculate youth-to-court distances ----------------------------------------#
 
-dt_it <- rename(dt_it, lat_i = lat, lon_i = lon)
-dt_c <- select(dll_c, j, lat_j = lat, lon_j = lon) %>% data.table()
-library(optiRum)
-dt_ijt <- CJ.dt(dt_it, dt_c) # Note: this is a very slow step, 
-dt_ijt[, dist := L1Dist_DegToMi(lat_i, lon_i, lat_j, lon_j)]
+# We will first approximate youth addresses by tract centroids. While the CJ.dt()
+# function can perform large cross-joins with data tables between e.g. youth 
+# and courts, this can lead to significant memory limitations.
 
-# Remove youth-court combinations outside of a certain radius, to avoid exploding the size of the data
-median(dt_ijt$dist)
-mean(dt_ijt$dist <= 3.0)
-dt_ijt <- dt_ijt[dist <= 3.0]
-dt_ijt <- dt_ijt[, `:=`(lat_i = NULL, lon_i = NULL, lat_j = NULL, lon_j = NULL)]
-gc()
+# Calculate distances between courts and each tract centroid
+dist_tc <-
+  tr@data %>%
+  select(tract = TRACTCE, lat_t = INTPTLAT, lon_t = INTPTLON) %>% 
+  filter(tract %in% chiTracts) %>% 
+  merge(select(dt_c, j, lat_j, lon_j)) %>%
+  mutate(lat_t = as.numeric(as.character(lat_t)),
+         lon_t = as.numeric(as.character(lon_t)),
+         dist = L1Dist_DegToMi(lat_t, lon_t, lat_j, lon_j))
+median(dist_tc$dist)
+mean(dist_tc$dist <= 3.0)
+local_tc <- 
+  dist_tc %>% 
+  filter(dist <= 3.0) %>% 
+  select(tract, j)
 
+# Create permutations between youth and local ball courts
+dt_ijt <- 
+  merge(dt_it, local_tc, by = "tract", all.x = TRUE, allow.cartesian = TRUE) %>% 
+  merge(dt_c %>% select(j, lat_j, lon_j, viol_1k), by = "j", all.x = TRUE) %>% 
+  .[!is.na(j)] %>% 
+  select(i, race, gender, age, povInt, j, viol_1k) %>% 
+  arrange(i, j)
+  
 # Output file: youth-court matches, coded with poverty, and court-to-court distances
   
 save(dt_ijt, dist_cc, dist_c.c, file="./data/prepped/youth-and-court-data.Rda")
 
-  
