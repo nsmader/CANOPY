@@ -1,4 +1,6 @@
 /key
+key.txt
+.RData
 .Rhistory
 ~*
 .Rproj.user
