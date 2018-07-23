@@ -1,0 +1,20 @@
+---
+title: "Generate Application Data for Pilot"
+author: "Nick Mader"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+load("../../data/prepped/youth-and-court-data.Rda")
+```
+
+# Background
+
+This 
+
+
+```{r}
+
+```
+
