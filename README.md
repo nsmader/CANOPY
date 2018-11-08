@@ -11,6 +11,8 @@ CANOPY (first named for "Computational Algorithm for Neighborhood-Optimized Prog
 
 This repository contains documentation of the technical methods that can be used to generate solutions to these complex problems, as well as code--currently still in development--that demonstrates implementations of these methods with realistic--but mock--data.
 
+A presentation with technical details underlying CANOPY can be downloaded [here](https://github.com/nsmader/CANOPY/raw/master/write-ups/presentation/CANOPY%20Project%20-%20Overview%20Presentation.pptx).
+
 ## The Problem
 
 When planning locations and offerings across regions and neighborhoods, major for‐profit retailers maximize profits and marketshare with more than rules of thumb. Their analytics incorporate knowledge about where people live, which are likely customers, and what their tastes are. By contrast, local governments and foundations may well be aware of providers and populations within a given human services domain like Head Start, youth anti‐violence programs, or job training, but lack information about how repositioning existing or new resources can more effectively reach larger, and higher priority populations. Without this information, planners are at risk of ineffective use of resources, overloading resources in some areas, overlooking key populations in others, and generally mismatching type of services to needs of local populations. These are deeper issues than maximizing revenue or brand; child development, public safety, and economic opportunity depend on efficient and effective allocation of these scarce resources.
