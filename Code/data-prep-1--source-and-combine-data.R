@@ -38,6 +38,7 @@ if (FALSE){
   api.key.install(key = key) # This only needs to be installed once  
 }
 myGeo <- geo.make(state = "IL", county = "Cook County", tract = "*")
+pullYear <- 2017
 
 ### Pull and clean poverty by race numbers ------------------------------------#
 # These are the B17020 tables
@@ -45,7 +46,7 @@ myGeo <- geo.make(state = "IL", county = "Cook County", tract = "*")
 suffix <- c("all" = "", "B" = "B", "W" = "H", "H" = "I")
 povRNs <- NULL
 for (s in suffix){
-  pull <- acs.fetch(endyear = 2015, span = 5, geography = myGeo,
+  pull <- acs.fetch(endyear = pullYear, span = 5, geography = myGeo,
                     table.number = paste0("B17020", s), col.names = "pretty")  
   pov_r <- data.frame(pull@estimate)
   colnames(pov_r) <-
@@ -64,7 +65,7 @@ povRNs_w <-
   povRNs %>% 
   gather(var, val, -geoid, -race) %>% 
   separate(var, into = c("pov", "age"), sep = ":") %>% 
-  filter(grepl("6 to|12 to", age)) %>% 
+  filter(grepl("12 to", age)) %>% # keep only 12 to 17 year olds
   mutate(tract = gsub(".*Census Tract (\\S+), Cook.+", "\\1", geoid),
          tract = str_pad(as.numeric(tract)*100, side = "left", width = 6, pad = "0"),
          age = gsub("\\s+(\\d+) to (\\d+).+", "\\1to\\2", age),
@@ -77,9 +78,9 @@ povRNs_w <-
          O_pct = O/all,
          W_pct = W/all)
 
-### Pull and clean detailed poverty numbres -----------------------------------#
+### Pull and clean detailed poverty numbers -----------------------------------#
 
-povNs <- acs.fetch(endyear = 2015, span = 5, geography = myGeo,
+povNs <- acs.fetch(endyear = pullYear, span = 5, geography = myGeo,
                    table.number = "B17024", col.names = "pretty")
 
 ### Select and develop only data of interest
@@ -92,7 +93,7 @@ povNs <-
   mutate(geoid = rownames(povNs.e)) %>%
   gather(var, val, -geoid) %>%
   separate(var, into = c("age", "range"), sep = ":") %>%
-  filter(grepl("6 to 11 years|12 to 17 years", age),
+  filter(grepl("12 to 17 years", age), # 6 to 11 years|
          range != "") %>%
   mutate(tract = gsub(".*Census Tract (\\S+), Cook.+", "\\1", geoid),
          tract = str_pad(as.numeric(tract)*100, side = "left", width = 6, pad = "0"),
@@ -117,13 +118,20 @@ totNs <-
 
 ### Create synthetic individual youth file ------------------------------------#
 
+# We want to obtain estimates of youth 14-17, segmented into leagues for 14-15,
+# and 16-17. (This is to keep the #s reasonable, as compared to a full 6-17
+# population that had been originally considered). Here, I make the simplifying
+# assumption that youth are uniformly distributed among the ages 12-17.
+povNs$val <- round(povNs$val * (4/6), 0) # here: ages 14-17 are 4 years, relative to the full 6 years between 12-17
+
 dt_i <- 
   data.table(povNs) %>% 
   .[, .(race = sample(c("B", "H", "O", "W"),
-                               val,
-                               prob = c(B_pct, H_pct, O_pct, W_pct),
-                               replace = TRUE)), 
-             by = c("tract", "age", "povInt")] %>%
+                      val,
+                      prob = c(B_pct, H_pct, O_pct, W_pct),
+                      replace = TRUE),
+        age = factor(sample(c("14to15", "16to17"), val, replace = TRUE))), 
+    by = c("tract", "povInt")] %>%
   .[, `:=`(i = 1:nrow(.),
            gender = sample(c("M", "F"), nrow(.), prob = c(0.5, 0.5), replace = TRUE))]
   # The sample() function creates a vector that has length equal to the number
@@ -140,20 +148,24 @@ dt_i[povInt == "ge200", round(prop.table(table(race)), 2)]
 
 ### Read shapefiles -----------------------------------------------------------#
 
-tr      <- readOGR(dsn = "data/raw", layer = "CensusTractsTIGER2010_cook")
+tr <- readOGR(dsn = "data/raw", layer = "CensusTractsTIGER2010_cook")
 tr <- spTransform(tr, CRS("+init=epsg:4326")) # This converts the XY coordinates to lat/long
 
 tr_cent_chi <- readOGR("data/raw", "Chicago_CensusTracts_2010_Centroids")
 chiTracts <- unique(tr_cent_chi@data$TRACTCE10)
 
-### Pull 2015 crime incident data from the Chicago data portal ----------------#
+### Pull crime incident data from the Chicago data portal ---------------------#
 
-cr <- read.socrata(url = "https://data.cityofchicago.org/resource/vwwp-7yr9.json")
+# For this API pull, see this link on SODA (Socrata Open Data API): https://dev.socrata.com/docs/endpoints.html
+# Here is a link describing parameters for building queries: https://dev.socrata.com/docs/queries/
+cr <- 
+  read.socrata(url = paste0("https://data.cityofchicago.org/resource/crimes.json?",
+                            "$select=fbi_code,latitude,longitude&$where=year=", pullYear))
 viol <- 
   data.table(cr) %>%
   .[fbi_code %in% c("01A", "02", "03", "04A", "04B")] %>%
-  .[, .(lon = as.numeric(location.longitude),
-        lat = as.numeric(location.latitude))] %>% # choosing x/y coords since that matches the tract shape files
+  .[, .(lon = as.numeric(longitude),
+        lat = as.numeric(latitude))] %>% # choosing x/y coords since that matches the tract shape files
   filter(!is.na(lat), !is.na(lon))
 rm(cr)
 viol_sp <- SpatialPoints(coords = viol)
@@ -182,8 +194,11 @@ dt_it <-
           select(tract = TRACTCE, lat_i = lat, lon_i = lon),
         by = "tract",
         all.y = TRUE) %>%
-  .[, .(i, race = factor(race), gender = factor(gender), age = factor(age),
-        povInt = factor(povInt), tract, lat_i, lon_i)] %>% 
+  .[, .(i, tract, lat_i, lon_i,
+        race   = factor(race, levels = c("B", "H", "W", "O")),
+        gender = factor(gender),
+        age    = factor(age, levels = c("14to15", "16to17")),
+        povInt = factor(povInt, levels = c("lt50", "50to100", "100to200", "ge200")))] %>% 
   .[tract %in% chiTracts]
 rm(dt_i)
 
@@ -211,13 +226,16 @@ d_c <-
   within(Address <- paste(Street.Address, City, State, sep = ", "))
 
 # Geocode and combine information
-ll_c <- geocode(d_c$Address, output = "latlon")
+# 
+ll_c <- geocode(d_c$Address, source = "dsk", output = "latlon")
+  # As a "source" Google's API has sometimes denied requests. May have ot do with
+  # their quota structure changing in July 2018.
 dll_c <-
   cbind(d_c, ll_c) %>%
-  filter(!is.na(lon)) %>%
-  mutate(j = row_number()) %>%
-  select(j, park = Park, lat, lon)
-
+  data.table() %>% 
+  .[!is.na(lon)] %>%
+  .[, .(j = 1:.N, park = Park, lat, lon)]
+  
 c_sp <- SpatialPoints(coords = dll_c[, c("lon", "lat")])
 proj4string(c_sp) <- CRS(proj4string(tr))
 
@@ -279,11 +297,13 @@ local_tc <-
 dt_ijt <- 
   merge(dt_it, local_tc, by = "tract", all.x = TRUE, allow.cartesian = TRUE) %>% 
   merge(dt_c %>% select(j, lat_j, lon_j, viol_1k), by = "j", all.x = TRUE) %>% 
-  .[!is.na(j)] %>% 
-  select(i, race, gender, age, povInt, j, viol_1k) %>% 
-  arrange(i, j)
+  .[!is.na(j) & !is.na(age) & !is.na(race)] %>% 
+  .[, dist := L1Dist_DegToMi(lat_i, lon_i, lat_j, lon_j)] %>% 
+  select(i, race, gender, age, povInt, tract, j, viol_1k, dist) %>% 
+  arrange(i, j) %>%
+  data.table()
   
 # Output file: youth-court matches, coded with poverty, and court-to-court distances
   
-save(dt_ijt, dist_cc, dist_c.c, file="./data/prepped/youth-and-court-data.Rda")
+save(dt_ijt, dist_cc, dist_c.c, dt_c, file = "data/prepped/youth-and-court-data.Rda")
 
