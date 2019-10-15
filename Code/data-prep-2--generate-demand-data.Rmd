@@ -6,9 +6,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-load("../../data/prepped/youth-and-court-data.Rda")
-
-package.list <- c("dplyr", "tidyr", "data.table", "stringr", "ggplot2", "scales")
+package.list <- c("dplyr", "tidyr", "data.table", "stringr", "leaflet", "ggplot2", "scales", "evd")
 for (p in package.list){
   if (!p %in% installed.packages()[, "Package"]) install.packages(p)
   library(p, character.only = TRUE)
@@ -19,11 +17,269 @@ cn <- function(x) colnames(x)
 
 # Background
 
-The script below maps the mock data on youth and our basketball programs into demand data, governed by a selection on preference parameters. These functions will be used to summarize patterns of youth engagement, and imagine how youth engagement changes as supply changes.
+The script below maps the mock data on youth and our basketball programs into demand data, governed by a selection on preference parameters. These functions will be used to summarize patterns of youth engagement and imagine how youth engagement changes as supply changes.
+
+```{r load and set up data}
+load("../data/prepped/youth-and-court-data.Rda")
+
+### Add an option j = 0 for all youth
+dt_i0 <- 
+  unique(select(dt_ijt, -j, -viol_1k, -dist)) %>% 
+  .[, `:=`(j = 0, viol_1k = 0, dist = 0)]
+dt_ijt <- rbind(dt_ijt, dt_i0) %>% arrange(i,j) %>% data.table()
+
+### Only keep youth below 200% FPL
+dt_ijt[j == 0, round(prop.table(table(povInt)), 2)]
+  # 40% of youth are >200% FPL.
+  # This restriction gives us a much smaller population to focus on
+dt_ijt <- dt_ijt[povInt != "ge200"]
+```
+
 
 # Set Parameters of Engagement
 
-```{r}
+Implement a demand system with the features that:
 
+* utility from participation decreases with both the violence of the court's neighbood and distance to that court
+* younger youth are more averse to both violence and distance
+
+```{r generate V_ij}
+
+CalcV <- function(dt, nprefs = 2){
+  # Reset existing value
+  dt[, V_ij := 0]
+  dt[age == "14to15", zg_ij := -2.0 + -0.08*viol_1k + -0.60*dist]
+  dt[age == "16to17", zg_ij := -3.0 + -0.04*viol_1k + -0.45*dist]
+
+  # Generate stochastic value and exponentiated value
+  set.seed(60637)
+  dt[age == "14to15", `:=`(V_ij = zg_ij + rgumbel(nrow(dt[age == "14to15"])), eZg = exp(zg_ij))]
+  dt[age == "16to17", `:=`(V_ij = zg_ij + rgumbel(nrow(dt[age == "16to17"])), eZg = exp(zg_ij))]
+
+  # Keep only the `n`-most preferred alternatives (and the outside option)
+  # This is equivalent to an application system which accepts limited options
+  # In practice, this also provides significant data reduction, which plays into
+  # computational complexity
+  if (!is.null(nprefs)){
+    dt_n0 <- dt[j != 0] %>% .[, topchoice := rank(V_ij) <= nprefs, by = i] %>% .[topchoice==TRUE] %>% .[, topchoice:=NULL]
+    dt_0 <- dt[j == 0]
+    dt <- rbind(dt_n0, dt_0) %>% data.table()
+  }
+  
+  # Normalize the reference alternative
+  dt[j == 0, `:=`(zg_ij = 0,
+                  V_ij  = 0)]
+  
+  # Generate indicator
+  dt[, d_ij := V_ij == max(V_ij) & V_ij > 0,
+     by = "i"]
+  
+  # Calculate ex ante probabilities
+  dt[, p_ij := exp(zg_ij)/sum(exp(zg_ij)), by = i]
+  
+  return(dt)
+}
+V_ij <- CalcV(dt_ijt)
+```
+
+# Examine the Nature of Preferences
+
+## Youth-side
+
+How many youth of each age most prefer making no choice at all?
+
+```{r measure engagement by age}
+d0 <- V_ij[j == 0, .(pct_d0 = mean(p_ij)), by = .(age, gender, race)]
+
+ggplot(d0, aes(x = age, y = pct_d0, fill = age, label = pct_d0)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(color = "black") %>% 
+  labs(title = "Probability of Disengagement",
+       x = "Age Group", y = "Pr. of Diseng.") +
+  scale_y_continuous(labels = percent) +
+  facet_grid(race ~ gender) +
+  coord_cartesian(ylim = c(0.75, 1.0))
+```
+
+The graph above shows an interesting and complex picture: black youth show the highest levels of disengagement among race groups, and while younger youth have higher disengagement than older among blacks, the opposite is true for other race groups. Hypotheses that could explain this are that:
+
+1. black youth have fewer court options nearby; and
+2. court options nearby black youth are more violent than those nearby other youth.
+
+Because we specifically know how demand is constructed--specifically, that preference does not depend on race, but rather only on crime and distance--hypothesis 1 could explain lower overall engagement for blacks, but that hypothesis 2 is necessary to explain the differential pattern of age-engagement for different races. Hypothesis 2, if correct, also would explain lower engagement.
+
+Examining the number of court options nearby, we see that black youth actually have the most courts nearby.
+
+```{r number of courts nearby}
+nJ_nearby <- 
+  V_ij[j != 0] %>% 
+  .[dist <= 1.0, .(n = .N), by = .(i, race)] %>% 
+  .[, .(mu_n = mean(n)), by = race]
+ggplot(data = nJ_nearby, aes(x = race, y = mu_n, fill = mu_n)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Race/Ethnicity Group", y = "Avg # Courts <= 1.0mi") +
+  theme(legend.position = "none")
+```
+
+Testing the second hypothesis, that courts nearby black youth are in more violent neighborhoods, we find...
+
+```{r neighborhood violence in nearest court}
+court_viol <- 
+  V_ij[j != 0] %>% 
+  .[, nearest := dist == min(dist), by = i] %>% 
+  .[nearest == TRUE] %>% 
+  .[, .(mu_cr = mean(viol_1k)), by = race]
+ggplot(court_viol, aes(x = race, y = mu_cr, fill = mu_cr)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_gradient(low = "black", high = "red") +
+  labs(x = "Race", y = "Avg Violent Crimes per 1k") +
+  theme(legend.position = "none")
+```
+
+Distances to most-preferred alternative:
+
+```{r distances to most-preferred alternative}
+d_jn0 <- V_ij[j != 0]
+ggplot(d_jn0, aes(x = dist, color = d_ij)) +
+  geom_density()
+```
+
+
+## Alternative-side
+
+What is the range of desired enrollments for the courts?
+
+```{r desired enrollments}
+n_j <- 
+  V_ij[, .(En_j = sum(p_ij)), by = j]
+ggplot(n_j[j != 0] %>% .[order(En_j)] %>% .[, q:=(1:nrow(.))/nrow(.)], aes(x = q, y = En_j)) +
+  geom_point() +
+  labs(title = "Expected Enrollments by Court\nUnder No Capacity Constraints", 
+       x = "Quantile", y = "Expected Enrollment")
+```
+
+We see that the range is from almost no expected enrollment at all, to a reasonably higher number. This shows strong diversity in the predictive factors, here simply proximity (and thus spatial dispersion), crime, and the density/dispersion of agents.
+
+Examining the total demand for enrollment, shown with its spatial distribution:
+
+```{r map of demand}
+demand_j <- 
+  merge(dt_c, n_j, by = "j", all.x = TRUE) %>% 
+  mutate(popup = paste0("<b>Viol</b>: ", round(viol_1k, 0), "<br>",
+                        "<b>Expected Enr</b>: ", round(En_j, 0)))
+leaflet() %>%
+  addProviderTiles("OpenStreetMap.Mapnik") %>%
+  addCircles(data = demand_j, lng = ~lon_j, lat = ~lat_j, radius = ~En_j, popup = ~popup)
+```
+
+Based on the dispersion of demand and some knowledge of Chicago neighborhoods, it seems that violence is a significant driver of demand. Looking at the bivariate correspondence between violence and enrollment:
+
+```{r expected enr vs violent crimes}
+ggplot(demand_j, aes(x = viol_1k, y = En_j)) +
+  geom_point() +
+  geom_smooth(method = "loess") +
+  labs(title = "Expected Enrollment vs Neighborhood Crime",
+       x = "Violent Crimes per 1,000 Residents, in Neighborhood of Court",
+       y = "Expected (Unconstrained) Demand for Enrollment")
+  
+```
+
+
+
+# Considering Constraints
+
+```{r slot rule of thumb}
+N_non0 <- sum(n_j[j!=0]$En_j)
+J <- length(unique(V_ij$j)) - 1
+cap_full <- round(N_non0/J, 0)
+```
+
+As a rule of thumb, it would take `r cap_full` slots per court, on average, to serve the entire population. We recognize from the figure above that these slots need to be unevenly distributed to meet entire demand. However, in a realistic situation, we recognize that:
+
+1. there is likely a scarcity of resources, meaning that we typically will not be able to provide a slot for every interested taker; and
+2. that we will prioritize access for certain populations in the face of scarcity.
+
+Indeed, creating finding the best scheme for resource allocation is the ultimate goal of CANOPY. We begin this section by building the technical machinery we need to grapple with these issues, first imposing a cap, and then developing a statistical scheme to estimate who would be able to access the slots in any given allocation.
+
+## Setting a Cap
+
+```{r}
+nS_r <- 20 # i.e. number of youth who can participate given one organizer assigned to a court
+nR_aj <- 1 # i.e. number of resources (e.g. organizer) per age groups per court
+AJ <- V_ij[j != 0, .(j, age)] %>% unique() %>% nrow()
+A <- V_ij[, .(age)] %>% unique() %>% nrow()
+N_r <- AJ*nR_aj
+N_s <- N_r*nS_r
+```
+
+The resources that we initialize are `r s_r` slots per resource, and `r r_aj` resources per age group and court. With `r J` courts and `r A` age groups, that works out to `r N_r` total resources, and `r N_s` slots. That means that we can fulfill roughly `r paste0(100*round(N_s/N_non0, 2), "%")` of total demand.
+
+We begin by assigning those slots perfectly evenly:
+
+```{r initialize slots evenly}
+r_j <- 
+  V_ij[j != 0, .(j, age)] %>%
+  unique() %>% # create frame of court-by-age group programs
+  .[, `:=`(r = nR_aj,
+           s = nR_aj*nS_r)] # Calculate the number of slots per program
+```
+
+Calculate fixed point enrollment probability
+
+```{r}
+Vs_ij <- 
+  merge(V_ij, r_j, by = c("j", "age"), all.x = TRUE) %>% 
+  .[, `:=`(En_j = 0,
+           x = 0, 
+           pe_ij = p_ij,
+           constr = FALSE,
+           constr.old = FALSE,
+           pe_i = 1,
+           pu_i = 0)]
+  # initialize columns: En_j is expected enrollment, pe_ij is equilibrium prob of enrollment
+
+FindFP <- function(dt, verbose = FALSE){
+  i <- 0
+  dt[, pe_ij := p_ij] # reset the equilibrium probability to unconstrianed preference
+  # /!\ return to determine whether we can use information on a prior step's endpoint to 
+  # calculate updated equilibrium probabilities without iterating from scratch
+  # Perhaps we could carry around information on what the unconstrained enrollment would have
+  # been, and what the previous shrinkage was. That way, we could create a new shrinkage measure, and
+  # know if expanded capacity has now unconstrain the alternative.
+  repeat{
+    i <- i + 1
+    if (verbose) print(paste0("Working on fixed point iteration: ", i))
+    # Check for oversubscription
+    dt[, En_j := sum(pe_ij), by = j]  %>%  # Get total
+    .[j != 0, `:=`(shrink = s / En_j,
+                   constr = En_j >= s)]  # Calc shrinkage factor (assuming even proportion) and mark constrained options
+
+    # Stop if there is no oversubscription (unlikely), or if there are no new constraints which require redistribution
+    if (all(dt[, .(check = constr == FALSE |
+                   constr == constr.old)]$check)) break
+    
+    # Redistribute probability across non-constrained options
+    # Note that the outside option is always unconstrained
+    dt[constr==TRUE, pe_ij := pe_ij * shrink]    %>%  # Proportionally reduce constrained probs
+    .[, k := sum(pe_ij), by = i]                 %>%  # Obtain total prob by i, noting p_c* + p_u = k < 1; equiv p_c* = k - p_u
+    .[constr==FALSE, pu_i := sum(pe_ij), by = i] %>%  # Calculate sum of p_u
+    .[constr==FALSE, pe_ij := pe_ij * (1 - k + pu_i)/pu_i] %>% # infl for p_u is-- x*p_u = 1-p_c* = 1-(k-p_u); x=(1-k+p_u)/p_u
+    .[, constr.old := constr]
+  }
+   
+  # Note: slowest steps are the pe_ij*shrink (not sure why), and the by = i
+  # Could these be sped by matrix operations?
+  # Is there some way to pre-calculate something here?
+  
+  # One alternative, with downsides, is to implement a lottery, where each i has an individual draw to sort them,
+  # and we clear the market of preferences based on slots. The problem is that the outcome is conditional on those
+  # draws.
+}
+system.time(fp <- FindFP(dt = Vs_ij, verbose = TRUE))
+```
+
+
+```{r save components}
+save(CalcV, FindFP, file = "../data/prepped/demand_fns.Rda")
 ```
 

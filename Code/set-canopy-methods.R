@@ -8,22 +8,21 @@
 
 rm(list=ls())
 setwd("~/GitHub/CANOPY")
-library(plyr)
-library(data.table) # To race against join() and other methods of merging tables for speed
-library(microbenchmark)
-library(magrittr)
-require(compiler)
-#enableJIT(3)
+packages.list <- c("dplyr", "data.table", "microbenchmark", "compiler")
+for (p in packages.list){
+  if (!p %in% installed.packages()[, "Package"]) install.packages(p)
+  library(p, character.only = TRUE)
+}
 enableJIT(0)
 
 cn <- function(x) colnames(x)
 rn <- function(x) rownames(x)
-
+grepv <- function(p, x, ...) grep(p, x, value = TRUE, ...)
 
 ### Set Up Initialization, Objective, Neighbors and Temperature ----------------
 
 ### Load youth data 
-load("./data/prepped/youth-to-court-data.Rda")
+load("data/prepped/youth-and-court-data.Rda")
 x_ij <- data.table(y2c)
 NC <- nrow(x_ij) # N is the number of youth, C(i) is the choice set available to individual
 i.u <- unique(x_ij$i)
